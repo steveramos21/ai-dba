@@ -1,14 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { mysql2 as mysql } from "mysql2";
-import { Pool as pgPool } from "pg";
-import { Connection as tediousConnection } from "tedious";
-import { MongoClient } from "mongodb";
-import { oracledb } from "oracledb";
-
-// Load configuration
-import * as fs from "fs";
-import * as path from "path";
+import { loadConfig } from "./config";
+// Import engine-specific implementations
+import { getBlockingChainsMySQL } from "./engines/mysql";
+import { getBlockingChainsPostgreSQL } from "./engines/postgres";
+import { getBlockingChainsSqlServer } from "./engines/sqlserver";
+import { getBlockingChainsOracle } from "./engines/oracle";
+import { getBlockingChainsMongoDB } from "./engines/mongodb";
+import { BlockingChain } from "./types";
 
 interface EngineConfig {
   type: "mysql" | "postgres" | "sqlserver" | "oracle" | "mongodb";
@@ -26,7 +25,8 @@ interface AiDbaConfig {
 
 // Simple config loader
 function loadConfig(): AiDbaConfig {
-  const configPath = path.resolve(process.cwd(), "config.yaml");
+  const configPath = require("path").resolve(process.cwd(), "config.yaml");
+  const fs = require("fs");
   if (!fs.existsSync(configPath)) {
     console.warn("config.yaml not found, using empty config");
     return { engines: {} };
@@ -36,28 +36,14 @@ function loadConfig(): AiDbaConfig {
   return { engines: {} };
 }
 
-// Define BlockingChain type
-interface BlockingChain {
-  blocking_pid: string | number;
-  blocked_pid: string | number;
-  wait_duration_ms: number;
-  wait_event: string;
-  blocking_query?: string;
-  blocked_query?: string;
-  database_name?: string;
-  wait_type?: string;
-  status?: string;
-  login_time?: string; // ISO string
-  host_name?: string;
-  program_name?: string;
-}
-
-// Placeholder: implement per-engine queries later
-async function getBlockingChains(engineId: string, config: EngineConfig): Promise<BlockingChain[]> {
-  // TODO: implement per engine
-  console.log(`Querying blocking chains for ${engineId} (${config.type})`);
-  return [];
-}
+// Map engineId to function
+const engineFunctions: Record<string, (config: EngineConfig) => Promise<BlockingChain[]>> = {
+  mysql: getBlockingChainsMySQL,
+  postgres: getBlockingChainsPostgreSQL,
+  sqlserver: getBlockingChainsSqlServer,
+  oracle: getBlockingChainsOracle,
+  mongodb: getBlockingChainsMongoDB,
+};
 
 // Set up MCP server
 const server = new McpServer({
@@ -88,11 +74,28 @@ server.tool(
           ],
         };
       }
-      const chains = await getBlockingChains(engineId, engines[engineId]);
+      const engineConfig = engines[engineId];
+      const func = engineFunctions[engineConfig.type];
+      if (!func) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Unsupported engine type: ${engineConfig.type}`,
+            },
+          ],
+        };
+      }
+      const chains = await func(engineConfig);
       results.push({ engineId, chains });
     } else {
       for (const [id, eng] of Object.entries(engines)) {
-        const chains = await getBlockingChains(id, eng);
+        const func = engineFunctions[eng.type];
+        if (!func) {
+          console.warn(`Unsupported engine type: ${eng.type} for engine ${id}`);
+          continue;
+        }
+        const chains = await func(eng);
         results.push({ engineId: id, chains });
       }
     }
