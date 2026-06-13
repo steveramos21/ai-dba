@@ -1,0 +1,17 @@
+services:
+  mysql-test:
+    image: mysql:8.0
+    container_name: ai-dba-mysql-test
+    environment:
+      MYSQL_ROOT_PASSWORD: testpassword
+      MYSQL_DATABASE: testdb
+    ports:
+      - "13306:3306"
+    command: >
+      --performance_schema=ON
+      --innodb_buffer_pool_size=128M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-ptestpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

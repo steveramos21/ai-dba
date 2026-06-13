@@ -1,40 +1,33 @@
 {
   "name": "ai-dba",
   "version": "1.0.0",
-  "description": "Universal database copilot - Server 2 (DBA Diagnostics)",
+  "description": "AI-DBA: Universal database copilot — diagnostics MCP server",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "test": "vitest",
-    "prepare": "npm run build"
-  },
-  "keywords": [
-    "database",
-    "db-a",
-    "mcp",
-    "diagnostics"
-  ],
-  "author": "",
-  "license": "MIT",
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "@types/react": "^18.0.0",
-    "typescript": "^5.0.0",
-    "vitest": "^1.0.0"
+    "prepare": "npm run build",
+    "start": "node dist/index.js --config config.yaml",
+    "repl": "node dist/index.js --config config.yaml repl",
+    "serve": "node dist/index.js --config config.yaml serve",
+    "blocking-chains": "node dist/index.js --config config.yaml blocking-chains",
+    "list-engines": "node dist/index.js --config config.yaml list-engines",
+    "test": "vitest"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "chalk": "^5.6.2",
+    "cli-table3": "^0.6.5",
     "commander": "^11.0.0",
-    "dotenv": "^16.6.1",
-    "ink": "^4.0.0",
-    "mongodb": "^6.0.0",
-    "mysql2": "^3.0.0",
-    "oracledb": "^6.0.0",
-    "pg": "^8.0.0",
-    "react": "^18.0.0",
-    "tedious": "^16.0.0",
-    "ts-node": "^10.9.2"
+    "inquirer": "^14.0.2",
+    "js-yaml": "^4.1.0",
+    "mysql2": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.16.5",
+    "typescript": "^5.5.0",
+    "vitest": "^1.0.0"
   }
 }
