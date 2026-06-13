@@ -4,6 +4,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import Table from "cli-table3";
 import { loadConfig, parseMysqlUrl, resolveMysqlConfig } from "./config.js";
+import type { EngineConfig } from "./config.js";
 // All heavy imports are dynamic — loaded only when the command runs.
 // This keeps the CLI fast and prevents the event loop from hanging
 // on MCP SDK / mysql2 listeners when running one-off commands.
@@ -110,7 +111,72 @@ program
     }
   });
 
-// ─── list-engines ──────────────────────────────────────────────
+// ─── connect ───────────────────────────────────────────────────
+program
+  .command("connect <url>")
+  .description("Connect to a database via URL and show its status")
+  .option("--json", "Output raw JSON instead of a table")
+  .action(async (url: string, cmdOpts: { json?: boolean }) => {
+    const { getBlockingChainsMySQL, closeAllPools } = await import("./connectors/mysql.js");
+
+    let engineConfig: EngineConfig;
+    if (url.startsWith("mysql://") || url.startsWith("mysql2://")) {
+      engineConfig = { type: "mysql", url: url.replace(/^mysql2:/, "mysql:") };
+    } else if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
+      console.error(chalk.red("PostgreSQL is not yet supported."));
+      process.exit(1);
+    } else {
+      console.error(chalk.red("Unsupported URL scheme. Use mysql:// or postgresql://"));
+      process.exit(1);
+    }
+
+    const parsed = parseMysqlUrl(engineConfig.url!);
+    const engineId = `${parsed.host}-${parsed.database}`;
+
+    console.log(chalk.green(`Connected to`) + chalk.cyan(` ${engineId}`));
+    console.log(chalk.dim(`  mysql://${parsed.user}:***@${parsed.host}:${parsed.port}/${parsed.database}`));
+
+    try {
+      const chains = await getBlockingChainsMySQL(engineId, engineConfig);
+      if (cmdOpts.json) {
+        console.log(JSON.stringify(chains, null, 2));
+      } else if (chains.length === 0) {
+        console.log(chalk.green("No blocking chains found."));
+      } else {
+        const table = new Table({
+          head: [
+            chalk.white("Blocking PID"),
+            chalk.white("Blocked PID"),
+            chalk.white("Wait"),
+            chalk.white("Database"),
+            chalk.white("Blocking Query"),
+            chalk.white("Blocked Query"),
+          ],
+          colWidths: [14, 14, 12, 14, 40, 40],
+          wordWrap: true,
+        });
+
+        for (const c of chains) {
+          table.push([
+            c.blocking_pid,
+            c.blocked_pid,
+            c.wait_event,
+            c.database_name ?? "-",
+            (c.blocking_query ?? "-").substring(0, 80),
+            (c.blocked_query ?? "-").substring(0, 80),
+          ]);
+        }
+        console.log(table.toString());
+        console.log(chalk.yellow(`${chains.length} blocking chain(s)`));
+      }
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      await closeAllPools();
+      process.exit(0);
+    }
+  });
 program
   .command("list-engines")
   .description("List configured database engines")
@@ -145,19 +211,25 @@ program
   .action(async () => {
     const { getBlockingChainsMySQL, closeAllPools } = await import("./connectors/mysql.js");
     const opts = program.opts();
-    const config = loadConfig(opts.config);
-    const engineIds = Object.keys(config.engines);
 
-    if (engineIds.length === 0) {
-      console.log(chalk.yellow("No engines configured. Edit config.yaml"));
-      process.exit(1);
+    // Load config if it exists, otherwise start with empty engines
+    let config: { engines: Record<string, EngineConfig> };
+    try {
+      config = loadConfig(opts.config);
+    } catch {
+      config = { engines: {} };
     }
 
-    console.log(chalk.cyan.bold("AI-DBA REPL") + chalk.dim(" — type a command or 'help'"));
-    console.log(chalk.dim(`Engines: ${engineIds.join(", ")}`));
-    console.log();
+    const engineIds = () => Object.keys(config.engines);
+    let currentEngine = engineIds()[0] ?? "";
 
-    let currentEngine = engineIds[0];
+    console.log(chalk.cyan.bold("AI-DBA REPL") + chalk.dim(" — type a command or 'help'"));
+    if (engineIds().length > 0) {
+      console.log(chalk.dim(`Engines: ${engineIds().join(", ")}`));
+    } else {
+      console.log(chalk.yellow("No engines configured. Use: connect <url>"));
+    }
+    console.log();
 
     const commands: Record<string, { desc: string; fn: (args: string[]) => Promise<void> }> = {
       help: {
@@ -172,9 +244,53 @@ program
           console.log();
         },
       },
+      connect: {
+        desc: "Connect to a database (connect <url>)",
+        fn: async (args) => {
+          const url = args[0];
+          if (!url) {
+            console.log(chalk.red("Usage: connect <url>"));
+            console.log(chalk.dim("  mysql://user:***@host:port/database?ssl=true"));
+            return;
+          }
+
+          // Detect engine type from URL scheme
+          let type: string;
+          let engineConfig: EngineConfig;
+          if (url.startsWith("mysql://") || url.startsWith("mysql2://")) {
+            type = "mysql";
+            const parsed = parseMysqlUrl(url.replace(/^mysql2:/, "mysql:"));
+            engineConfig = {
+              type: "mysql",
+              url: url.replace(/^mysql2:/, "mysql:"),
+            };
+          } else if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
+            type = "postgres";
+            engineConfig = { type: "postgres", url };
+          } else {
+            console.log(chalk.red(`Unsupported URL scheme. Use mysql:// or postgresql://`));
+            return;
+          }
+
+          // Generate an engine ID from host+database
+          const parsed = type === "mysql" ? parseMysqlUrl(engineConfig.url!) : null;
+          const id = parsed ? `${parsed.host}-${parsed.database}` : `engine-${Date.now()}`;
+
+          config.engines[id] = engineConfig;
+          currentEngine = id;
+          console.log(chalk.green(`Connected to ${chalk.bold(id)}`));
+          if (parsed) {
+            console.log(chalk.dim(`  mysql://${parsed.user}:***@${parsed.host}:${parsed.port}/${parsed.database}`));
+          }
+        },
+      },
       engines: {
         desc: "List configured engines",
         fn: async () => {
+          if (engineIds().length === 0) {
+            console.log(chalk.yellow("No engines. Use: connect <url>"));
+            return;
+          }
           const table = new Table({
             head: ["ID", "Type", "Host", "Port", "Database", "URL"],
           });
@@ -195,7 +311,7 @@ program
         fn: async (args) => {
           const id = args[0];
           if (!id || !config.engines[id]) {
-            console.log(chalk.red(`Unknown engine. Available: ${engineIds.join(", ")}`));
+            console.log(chalk.red(`Unknown engine. Available: ${engineIds().join(", ") || "(none)"}`));
             return;
           }
           currentEngine = id;
@@ -207,11 +323,10 @@ program
         fn: async () => {
           const engine = config.engines[currentEngine];
           if (!engine) {
-            console.log(chalk.red("No engine selected. Use: use <engineId>"));
+            console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
             return;
           }
           const resolved = resolveMysqlConfig(currentEngine, engine);
-          // Build a display-safe URL (mask the password)
           const displayUrl = `mysql://${resolved.user}:***@${resolved.host}:${resolved.port}/${resolved.database}${resolved.ssl ? "?ssl=true" : ""}`;
           console.log();
           console.log(chalk.bold(`  Engine:      `) + chalk.cyan(currentEngine));
@@ -229,7 +344,7 @@ program
         fn: async () => {
           const engine = config.engines[currentEngine];
           if (!engine) {
-            console.log(chalk.red("No engine selected. Use: use <engineId>"));
+            console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
             return;
           }
           if (engine.type !== "mysql") {
@@ -288,7 +403,7 @@ program
         {
           type: "input",
           name: "input",
-          message: chalk.cyan(`ai-dba[${currentEngine}]>`),
+          message: chalk.cyan(`ai-dba[${currentEngine || "no-engine"}]>`),
           prefix: "",
         },
       ]);
