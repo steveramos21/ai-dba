@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI-DBA Documentation</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e4e4e7;
+      --text-muted: #9ca3af;
+      --accent: #14b8a6;
+      --accent-dim: #0d9488;
+      --accent-bg: rgba(20, 184, 166, 0.1);
+      --code-bg: #12141c;
+      --error: #ef4444;
+      --warning: #f59e0b;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+    .layout {
+      display: flex;
+      min-height: 100vh;
+    }
+    nav {
+      width: 260px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 24px 0;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      overflow-y: auto;
+    }
+    nav .logo {
+      padding: 0 24px 24px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 16px;
+    }
+    nav .logo h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    nav .logo span {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    nav a {
+      display: block;
+      padding: 8px 24px;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 14px;
+      transition: all 0.15s;
+    }
+    nav a:hover, nav a.active {
+      color: var(--accent);
+      background: var(--accent-bg);
+    }
+    nav .section {
+      padding: 16px 24px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+    }
+    main {
+      margin-left: 260px;
+      flex: 1;
+      padding: 48px 64px;
+      max-width: 900px;
+    }
+    h2 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      color: #fff;
+    }
+    h3 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-top: 32px;
+      margin-bottom: 12px;
+      color: var(--accent);
+    }
+    h4 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-top: 24px;
+      margin-bottom: 8px;
+      color: #fff;
+    }
+    p { margin-bottom: 16px; }
+    code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 13px;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      color: var(--accent);
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: var(--text);
+    }
+    .cmd-var { color: #f59e0b; }
+    .cmd-flag { color: #818cf8; }
+    .cmd-comment { color: #6b7280; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+    th {
+      background: var(--surface);
+      text-align: left;
+      padding: 10px 14px;
+      font-weight: 600;
+      color: var(--accent);
+      border-bottom: 2px solid var(--border);
+    }
+    td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    tr:hover td { background: var(--accent-bg); }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-mcp { background: #7c3aed33; color: #a78bfa; }
+    .badge-cli { background: #14b8a633; color: #14b8a6; }
+    .badge-mysql { background: #3b82f633; color: #60a5fa; }
+    .callout {
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      border-left: 4px solid;
+    }
+    .callout-info { background: rgba(59, 130, 246, 0.1); border-color: #3b82f6; }
+    .callout-warn { background: rgba(245, 158, 11, 0.1); border-color: #f59e0b; }
+    .callout-tip { background: rgba(20, 184, 166, 0.1); border-color: var(--accent); }
+    .callout-title { font-weight: 600; margin-bottom: 4px; }
+    .callout p { margin-bottom: 4px; }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      transition: border-color 0.15s;
+    }
+    .card:hover { border-color: var(--accent); }
+    .card h4 { margin-top: 0; color: var(--accent); }
+    .card p { font-size: 14px; color: var(--text-muted); margin-bottom: 0; }
+    .arch-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 8px;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 13px;
+    }
+    .arch-block .dir { color: var(--text-muted); }
+    .arch-block .file { color: var(--accent); }
+    .arch-block .desc { color: var(--text-muted); }
+    .repl-demo {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .repl-demo .prompt { color: var(--accent); }
+    .repl-demo .output { color: var(--text-muted); }
+    .repl-demo .table-output { color: var(--text); }
+    @media (max-width: 768px) {
+      nav { display: none; }
+      main { margin-left: 0; padding: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <nav>
+      <div class="logo">
+        <h1>AI-DBA</h1>
+        <span>Universal Database Copilot v1.0</span>
+      </div>
+      <div class="section">Getting Started</div>
+      <a href="#quick-start" class="active">Quick Start</a>
+      <a href="#installation">Installation</a>
+      <a href="#configuration">Configuration</a>
+      <div class="section">Commands</div>
+      <a href="#list-engines">list-engines</a>
+      <a href="#blocking-chains">blocking-chains</a>
+      <a href="#repl">repl</a>
+      <a href="#serve">serve</a>
+      <div class="section">MCP Integration</div>
+      <a href="#mcp-setup">Agent Setup</a>
+      <a href="#mcp-tool">blocking-chains Tool</a>
+      <div class="section">Testing</div>
+      <a href="#docker-setup">Docker Environment</a>
+      <a href="#e2e-test">End-to-End Test</a>
+      <div class="section">Reference</div>
+      <a href="#architecture">Architecture</a>
+      <a href="#output-fields">Output Fields</a>
+      <a href="#error-handling">Error Handling</a>
+    </nav>
+
+    <main>
+      <h2 id="quick-start">Quick Start</h2>
+      <div class="card-grid">
+        <div class="card">
+          <h4>Interactive REPL</h4>
+          <p>Explore databases with an interactive prompt</p>
+          <pre><code>npm run repl</code></pre>
+        </div>
+        <div class="card">
+          <h4>One-off Command</h4>
+          <p>Scriptable CLI for automation</p>
+          <pre><code>npm run blocking-chains -- mysql-primary</code></pre>
+        </div>
+        <div class="card">
+          <h4>MCP Server</h4>
+          <p>Connect AI agents to your databases</p>
+          <pre><code>npm run serve</code></pre>
+        </div>
+      </div>
+
+      <h2 id="installation">Installation</h2>
+      <pre><code>git clone &lt;repo-url&gt; ai-dba
+cd ai-dba
+npm install
+npm run build</code></pre>
+
+      <h2 id="configuration">Configuration</h2>
+      <p>Create <code>config.yaml</code> from the example:</p>
+      <pre><code>cp config.yaml.example config.yaml</code></pre>
+      <p>Then edit with your database credentials:</p>
+      <pre><code>engines:
+  mysql-primary:
+    type: mysql
+    host: 127.0.0.1
+    port: 3306
+    user: root
+    password: yourpassword
+    database: yourdb</code></pre>
+
+      <div class="callout callout-warn">
+        <div class="callout-title">Security</div>
+        <p><code>config.yaml</code> is in <code>.gitignore</code> by default. Never commit database credentials to version control.</p>
+      </div>
+
+      <p>Multiple engines are supported:</p>
+      <pre><code>engines:
+  mysql-prod:
+    type: mysql
+    host: prod-db.internal
+    port: 3306
+    user: readonly
+    password: ${MYSQL_PROD_PASSWORD}
+    database: app_db
+  mysql-staging:
+    type: mysql
+    host: staging-db.internal
+    port: 3306
+    user: readonly
+    password: ${MYSQL_STAGING_PASSWORD}
+    database: app_db</code></pre>
+
+      <h2 id="list-engines">list-engines</h2>
+      <span class="badge badge-cli">CLI</span>
+      <p>List all configured database engines.</p>
+      <pre><code>npm run list-engines</code></pre>
+      <p>Output:</p>
+      <pre><code>┌────────────┬───────┬───────────┬───────┬──────────┐
+│ ID         │ Type  │ Host      │ Port  │ Database │
+├────────────┼───────┼───────────┼───────┼──────────┤
+│ mysql-test │ mysql │ 127.0.0.1 │ 13306 │ testdb   │
+└────────────┴───────┴───────────┴───────┴──────────┘</code></pre>
+
+      <h2 id="blocking-chains">blocking-chains</h2>
+      <span class="badge badge-cli">CLI</span> <span class="badge badge-mcp">MCP</span> <span class="badge badge-mysql">MySQL</span>
+      <p>Detect and report row-level blocking chains using MySQL <code>performance_schema.data_lock_waits</code>.</p>
+
+      <h4>Table output</h4>
+      <pre><code>npm run blocking-chains -- mysql-primary</code></pre>
+
+      <h4>JSON output</h4>
+      <pre><code>npm run blocking-chains -- mysql-primary -- --json</code></pre>
+
+      <p>When blocking is detected:</p>
+      <pre><code>┌──────────────┬──────────────┬────────────┬──────────┬──────────────────────┬──────────────────────┐
+│ Blocking PID │ Blocked PID  │ Wait       │ Database │ Blocking Query       │ Blocked Query        │
+├──────────────┼──────────────┼────────────┼──────────┼──────────────────────┼──────────────────────┤
+│ 102          │ 103          │ lock_wait  │ testdb   │ UPDATE blocking_test │ UPDATE blocking_test │
+│              │              │            │          │ SET value = 999      │ SET value = 888     │
+└──────────────┴──────────────┴────────────┴──────────┴──────────────────────┴──────────────────────┘
+1 blocking chain(s) on mysql-primary</code></pre>
+
+      <p>When no blocking exists:</p>
+      <pre><code>No blocking chains found on mysql-primary</code></pre>
+
+      <div class="callout callout-info">
+        <div class="callout-title">Requirements</div>
+        <p>MySQL 8.0+ with <code>performance_schema</code> enabled (default). If disabled, the tool returns an error telling you to enable it.</p>
+      </div>
+
+      <h2 id="repl">repl</h2>
+      <span class="badge badge-cli">CLI</span>
+      <p>Interactive REPL for exploring database diagnostics.</p>
+      <pre><code>npm run repl</code></pre>
+      <div class="repl-demo">
+        <span class="prompt">AI-DBA REPL</span> — type a command or 'help'<br>
+        <span class="output">Engines: mysql-test</span><br><br>
+        <span class="prompt">ai-dba[mysql-test]&gt;</span> help<br>
+        <span class="output">Commands:</span><br>
+        <span class="output">  help                 Show available commands</span><br>
+        <span class="output">  engines              List configured engines</span><br>
+        <span class="output">  use                  Switch to engine (use &lt;engineId&gt;)</span><br>
+        <span class="output">  blocking-chains      Show current blocking chains</span><br>
+        <span class="output">  quit                 Exit the REPL</span><br><br>
+        <span class="prompt">ai-dba[mysql-test]&gt;</span> bc<br>
+        <span class="table-output">No blocking chains.</span><br><br>
+        <span class="prompt">ai-dba[mysql-test]&gt;</span> use mysql-primary<br>
+        <span class="output">Switched to mysql-primary</span><br><br>
+        <span class="prompt">ai-dba[mysql-primary]&gt;</span> quit<br>
+        <span class="output">Bye.</span>
+      </div>
+
+      <h4>REPL Commands</h4>
+      <table>
+        <thead><tr><th>Command</th><th>Alias</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>help</code></td><td></td><td>Show available commands</td></tr>
+          <tr><td><code>engines</code></td><td><code>ls</code></td><td>List configured engines (current marked with *)</td></tr>
+          <tr><td><code>use &lt;engineId&gt;</code></td><td></td><td>Switch to a different engine</td></tr>
+          <tr><td><code>blocking-chains</code></td><td><code>bc</code></td><td>Show blocking chains on current engine</td></tr>
+          <tr><td><code>quit</code></td><td><code>q</code>, <code>exit</code></td><td>Exit the REPL</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="serve">serve</h2>
+      <span class="badge badge-mcp">MCP</span>
+      <p>Start the MCP server over stdio. Used by AI agents to call database diagnostics tools.</p>
+      <pre><code>npm run serve</code></pre>
+      <p>The server communicates via JSON-RPC over stdin/stdout. You typically don't run this directly — AI agents start it automatically.</p>
+
+      <h2 id="mcp-setup">MCP Agent Setup</h2>
+      <p>Add AI-DBA to your AI agent's MCP server configuration.</p>
+
+      <h4>Hermes</h4>
+      <p>In <code>~/.hermes/config.yaml</code>:</p>
+      <pre><code>mcpServers:
+  ai-dba-diagnostics:
+    command: node
+    args:
+      - /path/to/ai-dba/dist/index.js
+      - serve
+      - --config
+      - /path/to/ai-dba/config.yaml</code></pre>
+
+      <h4>Claude Desktop</h4>
+      <p>In <code>claude_desktop_config.json</code>:</p>
+      <pre><code>{
+  "mcpServers": {
+    "ai-dba-diagnostics": {
+      "command": "node",
+      "args": [
+        "/path/to/ai-dba/dist/index.js",
+        "serve",
+        "--config",
+        "/path/to/ai-dba/config.yaml"
+      ]
+    }
+  }
+}</code></pre>
+
+      <h2 id="mcp-tool">MCP Tool: blocking-chains</h2>
+      <p>The MCP server exposes one tool:</p>
+
+      <h4>blocking-chains</h4>
+      <p>Detect current row-level blocking chains on a MySQL database.</p>
+      <table>
+        <thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>engineId</code></td><td>string</td><td>Yes</td><td>Engine ID from config.yaml (e.g. <code>mysql-primary</code>)</td></tr>
+        </tbody>
+      </table>
+
+      <p>Example MCP call:</p>
+      <pre><code>{
+  "method": "tools/call",
+  "params": {
+    "name": "blocking-chains",
+    "arguments": {
+      "engineId": "mysql-primary"
+    }
+  }
+}</code></pre>
+
+      <p>Response (no blocking):</p>
+      <pre><code>{
+  "content": [
+    {
+      "type": "text",
+      "text": "No blocking chains found on engine \"mysql-primary\"."
+    }
+  ]
+}</code></pre>
+
+      <p>Response (blocking detected):</p>
+      <pre><code>{
+  "content": [
+    {
+      "type": "text",
+      "text": "[{\"engine_id\":\"mysql-primary\",\"blocking_pid\":102,\"blocked_pid\":103,...}]"
+    }
+  ]
+}</code></pre>
+
+      <h2 id="docker-setup">Docker Test Environment</h2>
+      <p>A Docker Compose file is included for local testing with MySQL 8.0.</p>
+
+      <h4>Start MySQL</h4>
+      <pre><code>docker compose up -d</code></pre>
+      <p>Wait until healthy:</p>
+      <pre><code>docker inspect --format='{{.State.Health.Status}}' ai-dba-mysql-test
+<span class="cmd-comment"># Repeat until "healthy"</span></code></pre>
+
+      <h4>Seed test data</h4>
+      <pre><code>docker exec ai-dba-mysql-test mysql -uroot -ptestpassword testdb \
+  -e "CREATE TABLE IF NOT EXISTS blocking_test (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        name VARCHAR(100),
+        value INT
+      );
+      INSERT IGNORE INTO blocking_test (name, value)
+      VALUES ('alpha', 1), ('beta', 2), ('gamma', 3);"</code></pre>
+
+      <h4>Stop MySQL</h4>
+      <pre><code>docker compose down    <span class="cmd-comment"># Stop containers</span>
+docker compose down -v <span class="cmd-comment"># Stop and delete data</span></code></pre>
+
+      <h2 id="e2e-test">End-to-End Test</h2>
+      <p>An automated test script creates a real blocking scenario and verifies detection:</p>
+      <pre><code>node test/test-blocking.mjs</code></pre>
+      <p>Expected output:</p>
+      <ol>
+        <li>Session 1 holds a row lock</li>
+        <li>Session 2 is blocked waiting for the same row</li>
+        <li>CLI detects and displays the blocking chain</li>
+        <li>JSON output shows full chain details</li>
+        <li>Cleanup — both sessions are released</li>
+      </ol>
+
+      <div class="callout callout-tip">
+        <div class="callout-title">Prerequisites</div>
+        <p>Docker MySQL must be running and seeded before running the test script. See <a href="#docker-setup">Docker Environment</a> above.</p>
+      </div>
+
+      <h2 id="architecture">Architecture</h2>
+      <div class="arch-block"><span class="dir">src/</span></div>
+      <div class="arch-block">  <span class="file">index.ts</span>        <span class="desc">— CLI entry point (commander, REPL)</span></div>
+      <div class="arch-block">  <span class="file">server.ts</span>       <span class="desc">— MCP server setup, tool registration</span></div>
+      <div class="arch-block">  <span class="file">config.ts</span>       <span class="desc">— YAML config loader with validation</span></div>
+      <div class="arch-block">  <span class="file">types.ts</span>         <span class="desc">— Shared TypeScript types (BlockingChain)</span></div>
+      <div class="arch-block">  <span class="dir">connectors/</span></div>
+      <div class="arch-block">    <span class="file">mysql.ts</span>       <span class="desc">— Lazy pool + performance_schema query</span></div>
+      <div class="arch-block">  <span class="dir">tools/</span></div>
+      <div class="arch-block">    <span class="file">blocking-chains.ts</span> <span class="desc">— MCP tool schema + handler</span></div>
+
+      <h4>Design decisions</h4>
+      <ul>
+        <li><strong>Lazy imports</strong> — MCP SDK and mysql2 are loaded dynamically. CLI commands like <code>list-engines</code> start instantly without loading database drivers.</li>
+        <li><strong>Lazy connection pools</strong> — MySQL connections are created on first use, not at startup.</li>
+        <li><strong>One tool per file</strong> — Adding a new tool means adding a new file and registering it in <code>server.ts</code>.</li>
+        <li><strong>Raw data only</strong> — The tool returns blocking chain facts. AI agents provide recommendations.</li>
+        <li><strong>isError: true</strong> — Standard MCP error pattern with human-readable messages.</li>
+      </ul>
+
+      <h2 id="output-fields">Output Fields</h2>
+      <table>
+        <thead><tr><th>Field</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>engine_id</code></td><td>string</td><td>Engine ID from config</td></tr>
+          <tr><td><code>blocking_pid</code></td><td>number</td><td>Process ID holding the lock</td></tr>
+          <tr><td><code>blocked_pid</code></td><td>number</td><td>Process ID waiting for the lock</td></tr>
+          <tr><td><code>wait_duration_ms</code></td><td>number</td><td>How long the blocked session has been waiting (ms)</td></tr>
+          <tr><td><code>wait_event</code></td><td>string</td><td>Wait event type (e.g. <code>lock_wait</code>)</td></tr>
+          <tr><td><code>blocking_query</code></td><td>string | null</td><td>SQL statement holding the lock</td></tr>
+          <tr><td><code>blocked_query</code></td><td>string | null</td><td>SQL statement waiting for the lock</td></tr>
+          <tr><td><code>database_name</code></td><td>string | null</td><td>Database context</td></tr>
+          <tr><td><code>wait_type</code></td><td>string | null</td><td>Lock type (e.g. "Sleep holding lock")</td></tr>
+          <tr><td><code>status</code></td><td>string | null</td><td>Thread status</td></tr>
+          <tr><td><code>host_name</code></td><td>string | null</td><td>Client hostname</td></tr>
+          <tr><td><code>program_name</code></td><td>string | null</td><td>Client program name</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="error-handling">Error Handling</h2>
+      <table>
+        <thead><tr><th>Scenario</th><th>Response</th></tr></thead>
+        <tbody>
+          <tr><td>Unknown engine ID</td><td><code>Unknown engine "x". Available: mysql-primary</code></td></tr>
+          <tr><td>Unsupported engine type</td><td><code>Engine "x" is type "postgres". Only MySQL is currently supported.</code></td></tr>
+          <tr><td>Config file not found</td><td><code>Config file not found: /path/to/config.yaml</code></td></tr>
+          <tr><td>performance_schema disabled</td><td><code>performance_schema is disabled on engine "x". Enable it with: SET GLOBAL performance_schema = ON;</code></td></tr>
+          <tr><td>Connection refused</td><td><code>Connection error on engine "x": ECONNREFUSED 127.0.0.1:3306</code></td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-info" style="margin-top: 40px;">
+        <div class="callout-title">Requirements</div>
+        <p>Node.js 18+ and MySQL 8.0+ (with <code>performance_schema</code> enabled, which is the default).</p>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // Active nav highlight on scroll
+    const sections = document.querySelectorAll('main h2[id]');
+    const navLinks = document.querySelectorAll('nav a[href^="#"]');
+
+    function updateActiveNav() {
+      let current = '';
+      for (const section of sections) {
+        const rect = section.getBoundingClientRect();
+        if (rect.top <= 100) current = section.id;
+      }
+      navLinks.forEach(link => {
+        link.classList.toggle('active', link.getAttribute('href') === '#' + current);
+      });
+    }
+
+    window.addEventListener('scroll', updateActiveNav);
+    updateActiveNav();
+
+    // Smooth scroll
+    navLinks.forEach(link => {
+      link.addEventListener('click', e => {
+        e.preventDefault();
+        const target = document.querySelector(link.getAttribute('href'));
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+  </script>
+</body>
+</html>
