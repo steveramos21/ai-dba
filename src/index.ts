@@ -3,7 +3,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import Table from "cli-table3";
-import { loadConfig } from "./config.js";
+import { loadConfig, parseMysqlUrl } from "./config.js";
 // All heavy imports are dynamic — loaded only when the command runs.
 // This keeps the CLI fast and prevents the event loop from hanging
 // on MCP SDK / mysql2 listeners when running one-off commands.
@@ -123,10 +123,15 @@ program
       console.log(chalk.yellow("No engines configured. Edit config.yaml"));
     } else {
       const table = new Table({
-        head: [chalk.white("ID"), chalk.white("Type"), chalk.white("Host"), chalk.white("Port"), chalk.white("Database")],
+        head: [chalk.white("ID"), chalk.white("Type"), chalk.white("Host"), chalk.white("Port"), chalk.white("Database"), chalk.white("URL")],
       });
       for (const [id, engine] of entries) {
-        table.push([chalk.cyan(id), engine.type, engine.host, String(engine.port), engine.database]);
+        if (engine.url) {
+          const parsed = parseMysqlUrl(engine.url);
+          table.push([chalk.cyan(id), engine.type, parsed.host, String(parsed.port), parsed.database, chalk.dim(engine.url)]);
+        } else {
+          table.push([chalk.cyan(id), engine.type, engine.host ?? "-", String(engine.port ?? 3306), engine.database ?? "-", "-"]);
+        }
       }
       console.log(table.toString());
     }
@@ -169,11 +174,16 @@ program
         desc: "List configured engines",
         fn: async () => {
           const table = new Table({
-            head: ["ID", "Type", "Host", "Port", "Database"],
+            head: ["ID", "Type", "Host", "Port", "Database", "URL"],
           });
           for (const [id, engine] of Object.entries(config.engines)) {
             const marker = id === currentEngine ? chalk.green(" *") : "";
-            table.push([id + marker, engine.type, engine.host, String(engine.port), engine.database]);
+            if (engine.url) {
+              const parsed = parseMysqlUrl(engine.url);
+              table.push([id + marker, engine.type, parsed.host, String(parsed.port), parsed.database, chalk.dim(engine.url)]);
+            } else {
+              table.push([id + marker, engine.type, engine.host ?? "-", String(engine.port ?? 3306), engine.database ?? "-", "-"]);
+            }
           }
           console.log(table.toString());
         },

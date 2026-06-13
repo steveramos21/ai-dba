@@ -33,13 +33,24 @@ cp config.yaml.example config.yaml
 
 ```yaml
 engines:
-  mysql-primary:
+  # Connection URL (recommended — works with cloud providers)
+  mysql-prod:
+    type: mysql
+    url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true
+
+  # Individual fields (legacy, for local/dev)
+  mysql-dev:
     type: mysql
     host: 127.0.0.1
     port: 3306
     user: root
     password: yourpassword
     database: yourdb
+
+  # SSL with custom options
+  mysql-aws:
+    type: mysql
+    url: mysql://admin:***@my-cluster.cluster-abc123.us-east-1.rds.amazonaws.com:3306/mydb?ssl={"rejectUnauthorized":false}
 ```
 
 ### 4. Run
@@ -195,6 +206,22 @@ Add `-v` to also delete the data volume.
 
 `config.yaml` format:
 
+### Connection URL (recommended)
+
+```yaml
+engines:
+  mysql-prod:
+    type: mysql
+    url: mysql://readonly:password@prod-db.internal:3306/app_db?ssl=true
+```
+
+The `url` field takes priority over individual fields. Supported URL params:
+- `ssl=true` — enable SSL with certificate verification
+- `ssl={"rejectUnauthorized":false}` — custom SSL options (JSON)
+- `connectionLimit=10` — pool size (default: 5)
+
+### Individual fields (legacy)
+
 ```yaml
 engines:
   <engine-id>:
@@ -212,11 +239,7 @@ Multiple engines are supported:
 engines:
   mysql-prod:
     type: mysql
-    host: prod-db.internal
-    port: 3306
-    user: readonly
-    password: ${MYSQL_PROD_PASSWORD}
-    database: app_db
+    url: mysql://readonly:password@prod-db.internal:3306/app_db?ssl=true
   mysql-staging:
     type: mysql
     host: staging-db.internal

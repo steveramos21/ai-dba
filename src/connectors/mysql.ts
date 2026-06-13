@@ -1,5 +1,6 @@
-import mysql, { type Pool, type PoolConnection, type RowDataPacket } from "mysql2/promise";
+import mysql, { type Pool, type PoolConnection, type RowDataPacket, type SslOptions } from "mysql2/promise";
 import type { EngineConfig } from "../config.js";
+import { resolveMysqlConfig } from "../config.js";
 import type { BlockingChain } from "../types.js";
 
 /**
@@ -13,17 +14,16 @@ function getPool(engineId: string, config: EngineConfig): Pool {
   const existing = pools.get(engineId);
   if (existing) return existing;
 
-  const pool = mysql.createPool({
-    host: config.host,
-    port: config.port,
-    user: config.user,
-    password: config.password,
-    database: config.database,
-    waitForConnections: true,
-    connectionLimit: 5,
-    queueLimit: 0,
-    enableKeepAlive: true,
-  });
+  const resolved = resolveMysqlConfig(engineId, config);
+  // mysql2 expects ssl as string | SslOptions, not boolean
+  // ssl=true means VERIFY_IDENTITY, any other ssl value passes through
+  const ssl = resolved.ssl === true ? "VERIFY_IDENTITY" as string : resolved.ssl as SslOptions | string | undefined;
+  const { ssl: _ssl, ...rest } = resolved;
+  const poolConfig: mysql.PoolOptions = {
+    ...rest,
+    ssl,
+  };
+  const pool = mysql.createPool(poolConfig);
 
   pools.set(engineId, pool);
   return pool;
@@ -66,8 +66,9 @@ export async function getBlockingChainsMySQL(
   try {
     const psEnabled = await checkPerformanceSchema(conn);
     if (!psEnabled) {
+      const resolved = resolveMysqlConfig(engineId, config);
       throw new Error(
-        `MySQL engine "${engineId}" (${config.host}:${config.port}): ` +
+        `MySQL engine "${engineId}" (${resolved.host}:${resolved.port}): ` +
         `performance_schema is DISABLED. Enable it with SET GLOBAL performance_schema=ON and restart MySQL.`
       );
     }
