@@ -5,9 +5,7 @@ import chalk from "chalk";
 import Table from "cli-table3";
 import { loadConfig, parseMysqlUrl, resolveMysqlConfig } from "./config.js";
 import type { EngineConfig } from "./config.js";
-// All heavy imports are dynamic — loaded only when the command runs.
-// This keeps the CLI fast and prevents the event loop from hanging
-// on MCP SDK / mysql2 listeners when running one-off commands.
+import type { DatabaseConnector } from "./connector.js";
 
 const program = new Command();
 
@@ -16,6 +14,18 @@ program
   .description("AI-DBA: Universal database copilot — diagnostics and operations")
   .version("1.0.0")
   .option("-c, --config <path>", "Path to config.yaml", "config.yaml");
+
+// ─── Get connector for an engine type ──────────────────────────
+function getConnector(type: string): DatabaseConnector | null {
+  switch (type) {
+    case "mysql":
+      // Dynamic import to avoid loading mysql2 for every command
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return null; // Will be loaded lazily in REPL
+    default:
+      return null;
+  }
+}
 
 // ─── MCP Server (stdio) ───────────────────────────────────────
 program
@@ -114,10 +124,10 @@ program
 // ─── connect ───────────────────────────────────────────────────
 program
   .command("connect <url>")
-  .description("Connect to a database via URL and show its status")
+  .description("Connect to a database via URL and run diagnostics")
   .option("--json", "Output raw JSON instead of a table")
   .action(async (url: string, cmdOpts: { json?: boolean }) => {
-    const { getBlockingChainsMySQL, closeAllPools } = await import("./connectors/mysql.js");
+    const { mysqlConnector } = await import("./connectors/mysql.js");
 
     let engineConfig: EngineConfig;
     if (url.startsWith("mysql://") || url.startsWith("mysql2://")) {
@@ -133,47 +143,17 @@ program
     const parsed = parseMysqlUrl(engineConfig.url!);
     const engineId = `${parsed.host}-${parsed.database}`;
 
-    console.log(chalk.green(`Connected to`) + chalk.cyan(` ${engineId}`));
+    console.log(chalk.green("Connected to") + chalk.cyan(` ${engineId}`));
     console.log(chalk.dim(`  mysql://${parsed.user}:***@${parsed.host}:${parsed.port}/${parsed.database}`));
 
     try {
-      const chains = await getBlockingChainsMySQL(engineId, engineConfig);
-      if (cmdOpts.json) {
-        console.log(JSON.stringify(chains, null, 2));
-      } else if (chains.length === 0) {
-        console.log(chalk.green("No blocking chains found."));
-      } else {
-        const table = new Table({
-          head: [
-            chalk.white("Blocking PID"),
-            chalk.white("Blocked PID"),
-            chalk.white("Wait"),
-            chalk.white("Database"),
-            chalk.white("Blocking Query"),
-            chalk.white("Blocked Query"),
-          ],
-          colWidths: [14, 14, 12, 14, 40, 40],
-          wordWrap: true,
-        });
-
-        for (const c of chains) {
-          table.push([
-            c.blocking_pid,
-            c.blocked_pid,
-            c.wait_event,
-            c.database_name ?? "-",
-            (c.blocking_query ?? "-").substring(0, 80),
-            (c.blocked_query ?? "-").substring(0, 80),
-          ]);
-        }
-        console.log(table.toString());
-        console.log(chalk.yellow(`${chains.length} blocking chain(s)`));
-      }
+      const chains = await mysqlConnector.query(engineId, engineConfig, "SELECT 1");
+      console.log(chalk.green("Connection OK."));
     } catch (err) {
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
       process.exit(1);
     } finally {
-      await closeAllPools();
+      await mysqlConnector.closeAllPools();
       process.exit(0);
     }
   });
@@ -204,12 +184,39 @@ program
     process.exit(0);
   });
 
+// ─── Helper: render query results ──────────────────────────────
+function renderResult(result: { columns: string[]; rows: Record<string, unknown>[]; affectedRows?: number }): void {
+  if (result.rows.length === 0 && result.columns.length === 0) {
+    console.log(chalk.yellow("Empty set"));
+  } else if (result.affectedRows !== undefined) {
+    const table = new Table({ head: result.columns.map(chalk.white) });
+    for (const row of result.rows) {
+      table.push(result.columns.map((col) => String(row[col] ?? "-")));
+    }
+    console.log(table.toString());
+    console.log(chalk.green(`${result.affectedRows} row(s) affected`));
+  } else {
+    const table = new Table({ head: result.columns.map(chalk.white) });
+    for (const row of result.rows) {
+      table.push(result.columns.map((col) => {
+        const val = row[col];
+        if (val === null) return chalk.dim("NULL");
+        if (val instanceof Date) return val.toISOString();
+        if (typeof val === "bigint") return val.toString();
+        return String(val);
+      }));
+    }
+    console.log(table.toString());
+    console.log(chalk.dim(`${result.rows.length} row(s) in set`));
+  }
+}
+
 // ─── Interactive REPL ──────────────────────────────────────────
 program
   .command("repl")
   .description("Interactive REPL for database diagnostics")
   .action(async () => {
-    const { getBlockingChainsMySQL, closeAllPools, queryMySQL } = await import("./connectors/mysql.js");
+    const { mysqlConnector } = await import("./connectors/mysql.js");
     const opts = program.opts();
 
     // Load config if it exists, otherwise start with empty engines
@@ -220,10 +227,21 @@ program
       config = { engines: {} };
     }
 
+    // Map of engine type -> connector instance
+    const connectors: Record<string, DatabaseConnector> = {
+      mysql: mysqlConnector,
+    };
+
     const engineIds = () => Object.keys(config.engines);
     let currentEngine = engineIds()[0] ?? "";
 
-    console.log(chalk.cyan.bold("AI-DBA REPL") + chalk.dim(" — type a command or 'help'"));
+    function getConnectorForEngine(engineId: string): DatabaseConnector | null {
+      const engine = config.engines[engineId];
+      if (!engine) return null;
+      return connectors[engine.type] ?? null;
+    }
+
+    console.log(chalk.cyan.bold("AI-DBA REPL") + chalk.dim(" — type 'help' for commands"));
     if (engineIds().length > 0) {
       console.log(chalk.dim(`Engines: ${engineIds().join(", ")}`));
     } else {
@@ -254,25 +272,19 @@ program
             return;
           }
 
-          // Detect engine type from URL scheme
           let type: string;
           let engineConfig: EngineConfig;
           if (url.startsWith("mysql://") || url.startsWith("mysql2://")) {
             type = "mysql";
-            const parsed = parseMysqlUrl(url.replace(/^mysql2:/, "mysql:"));
-            engineConfig = {
-              type: "mysql",
-              url: url.replace(/^mysql2:/, "mysql:"),
-            };
+            engineConfig = { type: "mysql", url: url.replace(/^mysql2:/, "mysql:") };
           } else if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
             type = "postgres";
             engineConfig = { type: "postgres", url };
           } else {
-            console.log(chalk.red(`Unsupported URL scheme. Use mysql:// or postgresql://`));
+            console.log(chalk.red("Unsupported URL scheme. Use mysql:// or postgresql://"));
             return;
           }
 
-          // Generate an engine ID from host+database
           const parsed = type === "mysql" ? parseMysqlUrl(engineConfig.url!) : null;
           const id = parsed ? `${parsed.host}-${parsed.database}` : `engine-${Date.now()}`;
 
@@ -281,6 +293,169 @@ program
           console.log(chalk.green(`Connected to ${chalk.bold(id)}`));
           if (parsed) {
             console.log(chalk.dim(`  mysql://${parsed.user}:***@${parsed.host}:${parsed.port}/${parsed.database}`));
+          }
+        },
+      },
+      databases: {
+        desc: "List databases on the server",
+        fn: async () => {
+          const engine = config.engines[currentEngine];
+          const connector = getConnectorForEngine(currentEngine);
+          if (!engine || !connector) {
+            console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+            return;
+          }
+          try {
+            const dbs = await connector.listDatabases(currentEngine, engine);
+            const table = new Table({ head: [chalk.white("Database")] });
+            for (const db of dbs) {
+              table.push([db.name]);
+            }
+            console.log(table.toString());
+            console.log(chalk.dim(`${dbs.length} database(s)`));
+          } catch (err) {
+            console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+          }
+        },
+      },
+      tables: {
+        desc: "List tables in current database",
+        fn: async (args) => {
+          const engine = config.engines[currentEngine];
+          const connector = getConnectorForEngine(currentEngine);
+          if (!engine || !connector) {
+            console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+            return;
+          }
+          const database = args[0];
+          try {
+            const tbls = await connector.listTables(currentEngine, engine, database);
+            const table = new Table({
+              head: [chalk.white("Table"), chalk.white("Rows"), chalk.white("Size"), chalk.white("Engine"), chalk.white("Collation")],
+            });
+            for (const t of tbls) {
+              table.push([
+                t.name,
+                t.rows?.toLocaleString() ?? "-",
+                t.sizeBytes ? `${(t.sizeBytes / 1024).toFixed(1)} KB` : "-",
+                t.engine ?? "-",
+                t.collation ?? "-",
+              ]);
+            }
+            console.log(table.toString());
+            console.log(chalk.dim(`${tbls.length} table(s)`));
+          } catch (err) {
+            console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+          }
+        },
+      },
+      describe: {
+        desc: "Describe table columns (describe <table>)",
+        fn: async (args) => {
+          const engine = config.engines[currentEngine];
+          const connector = getConnectorForEngine(currentEngine);
+          if (!engine || !connector) {
+            console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+            return;
+          }
+          const tableName = args[0];
+          if (!tableName) {
+            console.log(chalk.red("Usage: describe <table>"));
+            return;
+          }
+          const database = args[1]; // optional
+          try {
+            const cols = await connector.describeTable(currentEngine, engine, tableName, database);
+            if (cols.length === 0) {
+              console.log(chalk.yellow(`Table "${tableName}" not found or has no columns.`));
+              return;
+            }
+            const table = new Table({
+              head: [chalk.white("Column"), chalk.white("Type"), chalk.white("Null"), chalk.white("Key"), chalk.white("Default"), chalk.white("Extra")],
+            });
+            for (const c of cols) {
+              table.push([
+                c.name,
+                c.type,
+                c.nullable ? chalk.dim("YES") : chalk.red("NO"),
+                c.isPrimary ? chalk.green("PRI") : "",
+                c.defaultValue ?? chalk.dim("NULL"),
+                c.isAutoIncrement ? "auto_increment" : "",
+              ]);
+            }
+            console.log(table.toString());
+          } catch (err) {
+            console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+          }
+        },
+      },
+      indexes: {
+        desc: "List indexes on a table (indexes <table>)",
+        fn: async (args) => {
+          const engine = config.engines[currentEngine];
+          const connector = getConnectorForEngine(currentEngine);
+          if (!engine || !connector) {
+            console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+            return;
+          }
+          const tableName = args[0];
+          if (!tableName) {
+            console.log(chalk.red("Usage: indexes <table>"));
+            return;
+          }
+          try {
+            const idxs = await connector.listIndexes(currentEngine, engine, tableName);
+            if (idxs.length === 0) {
+              console.log(chalk.yellow(`No indexes found on "${tableName}".`));
+              return;
+            }
+            const table = new Table({
+              head: [chalk.white("Index"), chalk.white("Columns"), chalk.white("Unique"), chalk.white("Type")],
+            });
+            for (const idx of idxs) {
+              table.push([
+                idx.isPrimary ? chalk.green(idx.name) : idx.name,
+                idx.columns.join(", "),
+                idx.isUnique ? chalk.green("YES") : chalk.dim("no"),
+                idx.type ?? "-",
+              ]);
+            }
+            console.log(table.toString());
+          } catch (err) {
+            console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+          }
+        },
+      },
+      processes: {
+        desc: "Show active database processes/connections",
+        fn: async () => {
+          const engine = config.engines[currentEngine];
+          const connector = getConnectorForEngine(currentEngine);
+          if (!engine || !connector) {
+            console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+            return;
+          }
+          try {
+            const procs = await connector.listProcesses(currentEngine, engine);
+            const table = new Table({
+              head: [chalk.white("PID"), chalk.white("User"), chalk.white("Host"), chalk.white("DB"), chalk.white("Command"), chalk.white("Time"), chalk.white("State")],
+              wordWrap: true,
+            });
+            for (const p of procs) {
+              table.push([
+                p.pid,
+                p.user,
+                p.host,
+                p.database ?? chalk.dim("-"),
+                p.command,
+                `${p.time}s`,
+                (p.state ?? "-").substring(0, 40),
+              ]);
+            }
+            console.log(table.toString());
+            console.log(chalk.dim(`${procs.length} process(es)`));
+          } catch (err) {
+            console.error(chalk.red(err instanceof Error ? err.message : String(err)));
           }
         },
       },
@@ -352,6 +527,7 @@ program
             return;
           }
           try {
+            const { getBlockingChainsMySQL } = await import("./connectors/mysql.js");
             const chains = await getBlockingChainsMySQL(currentEngine, engine);
             if (chains.length === 0) {
               console.log(chalk.green("No blocking chains."));
@@ -379,52 +555,26 @@ program
         },
       },
       sql: {
-        desc: "Run a SQL query (sql <statement>)",
+        desc: "Run a raw SQL query (escape hatch)",
         fn: async (args) => {
           const engine = config.engines[currentEngine];
-          if (!engine) {
+          const connector = getConnectorForEngine(currentEngine);
+          if (!engine || !connector) {
             console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
-            return;
-          }
-          if (engine.type !== "mysql") {
-            console.log(chalk.red(`SQL not yet supported for ${engine.type}`));
             return;
           }
           const sql = args.join(" ");
           if (!sql) {
             console.log(chalk.red("Usage: sql <statement>"));
             console.log(chalk.dim("  sql SHOW DATABASES"));
-            console.log(chalk.dim("  sql SHOW TABLES"));
             console.log(chalk.dim("  sql SELECT * FROM users LIMIT 10"));
+            console.log(chalk.dim(""));
+            console.log(chalk.dim("Note: prefer standard commands (databases, tables, describe, etc.)"));
             return;
           }
           try {
-            const result = await queryMySQL(currentEngine, engine, sql);
-            if (result.rows.length === 0 && result.columns.length === 0) {
-              console.log(chalk.yellow("Empty set"));
-            } else if (result.affectedRows !== undefined) {
-              // DML statement
-              const table = new Table({ head: result.columns.map(chalk.white) });
-              for (const row of result.rows) {
-                table.push(result.columns.map((col) => String(row[col] ?? "-")));
-              }
-              console.log(table.toString());
-              console.log(chalk.green(`${result.affectedRows} row(s) affected`));
-            } else {
-              // SELECT/SHOW result set
-              const table = new Table({ head: result.columns.map(chalk.white) });
-              for (const row of result.rows) {
-                table.push(result.columns.map((col) => {
-                  const val = row[col];
-                  if (val === null) return chalk.dim("NULL");
-                  if (val instanceof Date) return val.toISOString();
-                  if (typeof val === "bigint") return val.toString();
-                  return String(val);
-                }));
-              }
-              console.log(table.toString());
-              console.log(chalk.dim(`${result.rows.length} row(s) in set`));
-            }
+            const result = await connector.query(currentEngine, engine, sql);
+            renderResult(result);
           } catch (err) {
             console.error(chalk.red(err instanceof Error ? err.message : String(err)));
           }
@@ -433,7 +583,10 @@ program
       quit: {
         desc: "Exit the REPL",
         fn: async () => {
-          await closeAllPools();
+          // Close all connector pools
+          for (const connector of Object.values(connectors)) {
+            await connector.closeAllPools();
+          }
           console.log(chalk.dim("Bye."));
           process.exit(0);
         },
@@ -444,13 +597,18 @@ program
     const aliases: Record<string, string> = {
       bc: "blocking-chains",
       ls: "engines",
+      db: "databases",
+      dt: "tables",
+      desc: "describe",
+      idx: "indexes",
+      ps: "processes",
       s: "status",
       q: "quit",
       exit: "quit",
     };
 
-    // SQL keywords that should be auto-routed to the sql command
-    const sqlKeywords = ["select", "show", "describe", "desc", "explain", "insert", "update", "delete", "create", "alter", "drop", "truncate", "use", "with"];
+    // SQL keywords that auto-route to the sql command
+    const sqlKeywords = ["select", "show", "describe", "desc", "explain", "insert", "update", "delete", "create", "alter", "drop", "truncate", "with"];
 
     while (true) {
       const { default: inquirer } = await import("inquirer");
@@ -470,7 +628,7 @@ program
       const cmd = parts[0].toLowerCase();
       const args = parts.slice(1);
 
-      // Auto-route SQL keywords to the sql command
+      // Resolve aliases, then check if it's a SQL keyword
       const resolved = aliases[cmd] ?? (sqlKeywords.includes(cmd) ? "sql" : cmd);
       const command = commands[resolved];
 
