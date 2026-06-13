@@ -55,7 +55,7 @@ export class MySQLConnector implements DatabaseConnector {
     const connection = await pool.getConnection();
     try {
       const [rows] = await connection.query<RowDataPacket[]>(
-        "SELECT TABLE_NAME as name, TABLE_ROWS as rows, DATA_LENGTH as sizeBytes, ENGINE as engine, TABLE_COLLATION as collation FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?",
+        "SELECT TABLE_NAME as name, TABLE_ROWS as `rows`, DATA_LENGTH as sizeBytes, ENGINE as engine, TABLE_COLLATION as collation FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?",
         [config.database]
       );
       return rows.map((row) => ({
