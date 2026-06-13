@@ -6,8 +6,12 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
+    "prepare": "npm run build",
+    "start": "node dist/index.js --config config.yaml",
+    "repl": "node dist/index.js --config config.yaml repl",
+    "serve": "node dist/index.js --config config.yaml serve",
+    "blocking-chains": "node dist/index.js --config config.yaml blocking-chains",
+    "list-engines": "node dist/index.js --config config.yaml list-engines",
     "test": "vitest"
   },
   "dependencies": {
