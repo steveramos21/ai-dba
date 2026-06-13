@@ -1,14 +1,15 @@
 export interface BlockingChain {
-  blocking_pid: string | number;
-  blocked_pid: string | number;
+  engine_id: string;
+  blocking_pid: number;
+  blocked_pid: number;
   wait_duration_ms: number;
   wait_event: string;
-  blocking_query?: string;
-  blocked_query?: string;
-  database_name?: string;
-  wait_type?: string;
-  status?: string;
-  login_time?: string; // ISO string
-  host_name?: string;
-  program_name?: string;
+  blocking_query: string | null;
+  blocked_query: string | null;
+  database_name: string | null;
+  wait_type: string | null;
+  status: string | null;
+  host_name: string | null;
+  program_name: string | null;
+  login_time: string | null;
 }

@@ -1,38 +1,8 @@
-# AI-DBA Configuration Example
 engines:
-  mysql-primary:
+  mysql-test:
     type: mysql
-    host: localhost
-    port: 3306
+    host: 127.0.0.1
+    port: 13306
     user: root
-    password: example
-    database: test
-  postgres-primary:
-    type: postgres
-    host: localhost
-    port: 5432
-    user: postgres
-    password: example
-    database: test
-  sqlserver-primary:
-    type: sqlserver
-    host: localhost
-    port: 1433
-    user: sa
-    password: Example123!
-    database: test
-  oracle-primary:
-    type: oracle
-    host: localhost
-    port: 1521
-    user: system
-    password: example
-    database: ORCLPDB1
-  mongodb-primary:
-    type: mongodb
-    host: localhost
-    port: 27017
-    username: root
-    password: example
-    database: test
-    # connection string alternative: uri: mongodb://root:example@localhost:27017
+    password: testpassword
+    database: testdb
