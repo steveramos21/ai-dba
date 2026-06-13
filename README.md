@@ -6,7 +6,9 @@ Universal database copilot — diagnostics, operations, and performance analysis
 
 - **MCP Server** — expose database diagnostics as tools for AI agents (Hermes, Claude Code, etc.)
 - **CLI** — one-off commands for scripting and automation
-- **Interactive REPL** — explore your databases interactively
+- **Interactive REPL** — explore your databases interactively with standard DBA commands
+- **Connection URLs** — connect via `mysql://user:pass@host:port/db?ssl=true` (no config file needed)
+- **Database-agnostic commands** — `databases`, `tables`, `describe`, `indexes`, `processes` work across engines
 - **MySQL blocking chains** — detect and report row-level blocking with full query details
 
 ## Quick Start
@@ -23,50 +25,27 @@ npm install
 npm run build
 ```
 
-### 3. Configure
+### 3. Connect and explore
 
-Copy the example config and edit with your database credentials:
+Option A — **Config file** (for multiple engines):
 
 ```bash
 cp config.yaml.example config.yaml
+# Edit config.yaml with your database credentials
+npm run repl
 ```
 
-```yaml
-engines:
-  # Connection URL (recommended — works with cloud providers)
-  mysql-prod:
-    type: mysql
-    url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true
-
-  # Individual fields (legacy, for local/dev)
-  mysql-dev:
-    type: mysql
-    host: 127.0.0.1
-    port: 3306
-    user: root
-    password: yourpassword
-    database: yourdb
-
-  # SSL with custom options
-  mysql-aws:
-    type: mysql
-    url: mysql://admin:***@my-cluster.cluster-abc123.us-east-1.rds.amazonaws.com:3306/mydb?ssl={"rejectUnauthorized":false}
-```
-
-### 4. Run
+Option B — **Connection URL** (no config file needed):
 
 ```bash
-# List configured engines
-node dist/index.js --config config.yaml list-engines
+node dist/index.js repl
+# Then: connect mysql://root:password@127.0.0.1:3306/mydb
+```
 
-# Check blocking chains
-node dist/index.js --config config.yaml blocking-chains mysql-primary
+Option C — **One-shot command**:
 
-# Interactive REPL
-node dist/index.js --config config.yaml repl
-
-# MCP server (for AI agents)
-node dist/index.js --config config.yaml serve
+```bash
+node dist/index.js connect 'mysql://root:password@127.0.0.1:3306/mydb'
 ```
 
 ## Commands
@@ -76,6 +55,7 @@ node dist/index.js --config config.yaml serve
 | `serve` | Start MCP server over stdio (for AI agents) |
 | `list-engines` | List configured database engines |
 | `blocking-chains <engineId>` | Show current blocking chains |
+| `connect <url>` | Connect to a database via URL |
 | `repl` | Interactive REPL for database diagnostics |
 
 ### Global Options
@@ -85,6 +65,15 @@ node dist/index.js --config config.yaml serve
 | `-c, --config <path>` | Path to config.yaml | `config.yaml` |
 | `-V, --version` | Show version | — |
 | `-h, --help` | Show help | — |
+
+### `connect <url>`
+
+Connect to a database via URL and run diagnostics. No config file needed.
+
+```bash
+ai-dba connect 'mysql://root:password@127.0.0.1:3306/mydb'
+ai-dba connect 'mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true'
+```
 
 ### `blocking-chains`
 
@@ -118,7 +107,8 @@ Detects row-level blocking chains using MySQL `performance_schema.data_lock_wait
 ### `repl`
 
 ```bash
-ai-dba repl
+ai-dba repl                # Uses config.yaml
+ai-dba repl                # No config — start empty, use connect
 ```
 
 Interactive commands:
@@ -126,10 +116,65 @@ Interactive commands:
 | Command | Alias | Description |
 |---------|-------|-------------|
 | `help` | | Show available commands |
+| `connect <url>` | | Connect to a database via URL |
+| `databases` | `db` | List databases on the server |
+| `tables` | `dt` | List tables (with rows, size, engine) |
+| `describe <table>` | `desc` | Show column details (type, nullable, key, default) |
+| `indexes <table>` | `idx` | List indexes on a table |
+| `processes` | `ps` | Show active connections/processes |
 | `engines` | `ls` | List configured engines (current marked with *) |
 | `use <engineId>` | | Switch to a different engine |
+| `status` | `s` | Show connection details for current engine |
 | `blocking-chains` | `bc` | Show blocking chains on current engine |
+| `sql <statement>` | | Run a raw SQL query (escape hatch) |
 | `quit` | `q`, `exit` | Exit the REPL |
+
+SQL keywords are auto-detected — just type `SHOW DATABASES` or `SELECT * FROM users` directly.
+
+**Example session:**
+
+```
+AI-DBA REPL — type 'help' for commands
+No engines configured. Use: connect <url>
+
+ai-dba[no-engine]> connect mysql://root:password@127.0.0.1:13306/testdb
+Connected to 127.0.0.1-testdb
+  mysql://root:***@127.0.0.1:13306/testdb
+
+ai-dba[127.0.0.1-testdb]> databases
+┌────────────────────┐
+│ Database           │
+├────────────────────┤
+│ information_schema │
+│ testdb             │
+└────────────────────┘
+2 database(s)
+
+ai-dba[127.0.0.1-testdb]> tables
+┌────────────────┬──────┬─────────┬─────────┬─────────────────────┐
+│ Table          │ Rows  │ Size    │ Engine  │ Collation           │
+├────────────────┼──────┼─────────┼─────────┼─────────────────────┤
+│ blocking_test  │ 3     │ 16.0 KB │ InnoDB  │ utf8mb4_0900_ai_ci  │
+└────────────────┴──────┴─────────┴─────────┴─────────────────────┘
+1 table(s)
+
+ai-dba[127.0.0.1-testdb]> describe blocking_test
+┌─────────┬──────────────┬──────┬─────┬─────────┬────────────────┐
+│ Column  │ Type         │ Null │ Key │ Default  │ Extra          │
+├─────────┼──────────────┼──────┼─────┼─────────┼────────────────┤
+│ id      │ int          │ NO   │ PRI │ NULL     │ auto_increment │
+│ name    │ varchar(100) │ YES  │     │ NULL     │                │
+│ value   │ int          │ YES  │     │ NULL     │                │
+└─────────┴──────────────┴──────┴─────┴─────────┴────────────────┘
+
+ai-dba[127.0.0.1-testdb]> processes
+┌──────┬──────┬──────────────────────┬─────────┬─────────┬──────┬─────────────┐
+│ PID  │ User │ Host                 │ DB      │ Command │ Time │ State       │
+├──────┼──────┼──────────────────────┼─────────┼─────────┼──────┼─────────────┤
+│ 5    │ root │ 172.23.0.1:54312     │ testdb  │ Query   │ 0s   │ starting    │
+└──────┴──────┴──────────────────────┴─────────┴─────────┴──────┴─────────────┘
+1 process(es)
+```
 
 ### `serve`
 
@@ -192,8 +237,6 @@ An automated test script creates a real blocking scenario and verifies detection
 node test/test-blocking.mjs
 ```
 
-Expected output: a table showing the blocking chain, then JSON output, then cleanup.
-
 ### Stop MySQL
 
 ```bash
@@ -212,7 +255,7 @@ Add `-v` to also delete the data volume.
 engines:
   mysql-prod:
     type: mysql
-    url: mysql://readonly:password@prod-db.internal:3306/app_db?ssl=true
+    url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true
 ```
 
 The `url` field takes priority over individual fields. Supported URL params:
@@ -239,7 +282,7 @@ Multiple engines are supported:
 engines:
   mysql-prod:
     type: mysql
-    url: mysql://readonly:password@prod-db.internal:3306/app_db?ssl=true
+    url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true
   mysql-staging:
     type: mysql
     host: staging-db.internal
@@ -255,16 +298,18 @@ engines:
 
 ```
 src/
-  index.ts              CLI entry point (commander)
+  index.ts              CLI entry point (commander, REPL)
   server.ts             MCP server setup
-  config.ts             YAML config loader
+  config.ts             YAML config loader with URL parsing
+  connector.ts          DatabaseConnector interface (engine-agnostic)
   types.ts              Shared TypeScript types
   connectors/
-    mysql.ts            MySQL connection pool + blocking-chains query
+    mysql.ts            MySQLConnector (implements DatabaseConnector)
   tools/
     blocking-chains.ts  MCP tool definition + handler
 ```
 
+- **DatabaseConnector interface** — standard commands (`databases`, `tables`, `describe`, `indexes`, `processes`, `query`) that work across engines. Add PostgreSQL or SQL Server by implementing the interface.
 - **Lazy imports** — MCP SDK and mysql2 are loaded dynamically only when needed. CLI commands like `list-engines` start instantly without loading database drivers.
 - **Lazy connection pools** — MySQL connections are created on first use, not at startup.
 - **One tool per file** — `src/tools/blocking-chains.ts` is self-contained (schema + handler). Adding a new tool means adding a new file and registering it in `server.ts`.
