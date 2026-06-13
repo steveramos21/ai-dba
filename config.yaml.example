@@ -3,15 +3,25 @@
 
 # 1. Connection URL (recommended — works with cloud providers)
 engines:
-  mysql-prod:
+  mysql-test:
     type: mysql
-    url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true
+    url: mysql://root:testpassword@127.0.0.1:13306/testdb
 
   # 2. Individual fields (legacy, for local/dev)
-  mysql-dev:
-    type: mysql
-    host: 127.0.0.1
-    port: 3306
-    user: root
-    password: yourpassword
-    database: yourdb
+  # mysql-dev:
+  #   type: mysql
+  #   host: 127.0.0.1
+  #   port: 3306
+  #   user: root
+  #   password: yourpassword
+  #   database: yourdb
+
+  # PostgreSQL (connection URL — pass-through to pg driver)
+  postgres-test:
+    type: postgres
+    url: postgresql://postgres:testpassword@127.0.0.1:15432/testdb
+
+  # PostgreSQL with SSL
+  # postgres-prod:
+  #   type: postgres
+  #   url: postgresql://readonly:***@prod-db.internal:5432/app_db?sslmode=require

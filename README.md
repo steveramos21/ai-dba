@@ -7,8 +7,9 @@ Universal database copilot — diagnostics, operations, and performance analysis
 - **MCP Server** — expose database diagnostics as tools for AI agents (Hermes, Claude Code, etc.)
 - **CLI** — one-off commands for scripting and automation
 - **Interactive REPL** — explore your databases interactively with standard DBA commands
-- **Connection URLs** — connect via `mysql://user:pass@host:port/db?ssl=true` (no config file needed)
+- **Connection URLs** — connect via `mysql://` or `postgresql://` URLs (no config file needed)
 - **Database-agnostic commands** — `databases`, `tables`, `describe`, `indexes`, `processes` work across engines
+- **Multi-engine support** — MySQL and PostgreSQL connectors, more engines coming
 - **MySQL blocking chains** — detect and report row-level blocking with full query details
 
 ## Quick Start
@@ -45,7 +46,11 @@ node dist/index.js repl
 Option C — **Connect via URL** (drops into REPL):
 
 ```bash
+# MySQL
 npm run connect -- 'mysql://root:***@127.0.0.1:3306/mydb'
+
+# PostgreSQL
+npm run connect -- 'postgresql://postgres:***@127.0.0.1:5432/mydb'
 # Connects and opens interactive REPL
 ```
 
@@ -69,10 +74,17 @@ npm run connect -- 'mysql://root:***@127.0.0.1:3306/mydb'
 
 ### `connect <url>`
 
-Connect to a database via URL and open an interactive REPL. No config file needed.
+Connect to a database via URL and open an interactive REPL. No config file needed. Supports `mysql://`, `postgresql://`, and `postgres://` URL schemes.
 
 ```bash
+# MySQL
 npm run connect -- 'mysql://root:***@127.0.0.1:3306/mydb'
+
+# PostgreSQL
+npm run connect -- 'postgresql://postgres:***@127.0.0.1:5432/mydb'
+
+# With --type override
+npm run connect -- 'postgresql://user:***@host:5432/db' --type postgres
 ```
 
 This connects, verifies the connection, then drops you into the REPL where you can run `databases`, `tables`, `describe`, `indexes`, `processes`, etc.
@@ -103,7 +115,7 @@ Detects row-level blocking chains using MySQL `performance_schema.data_lock_wait
 **Error cases:**
 
 - Unknown engine ID → `Unknown engine "x". Available: mysql-primary`
-- Unsupported engine type → `Engine "x" is type "postgres". Only MySQL is currently supported.`
+- Unsupported engine type → `Engine "x" is type "postgres". Only MySQL blocking chains are currently supported.`
 - `performance_schema` disabled → error message telling user to enable it
 
 ### `repl`
@@ -201,9 +213,9 @@ The server exposes one tool:
 
 ## Docker Test Environment
 
-A Docker Compose file is included for local testing with MySQL 8.0.
+A Docker Compose file is included for local testing with MySQL 8.0 and PostgreSQL 16.
 
-### Start MySQL
+### Start databases
 
 ```bash
 docker compose up -d
@@ -213,10 +225,11 @@ Wait until healthy:
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' ai-dba-mysql-test
-# Repeat until "healthy"
+docker inspect --format='{{.State.Health.Status}}' ai-dba-postgres-test
+# Repeat until both show "healthy"
 ```
 
-### Seed test data
+### Seed MySQL test data
 
 ```bash
 docker exec ai-dba-mysql-test mysql -uroot -ptestpassword testdb \
@@ -229,7 +242,7 @@ docker exec ai-dba-mysql-test mysql -uroot -ptestpassword testdb \
 cp config.yaml.example config.yaml
 ```
 
-The example config already points to the Docker MySQL on port 13306.
+The example config points to both Docker MySQL on port 13306 and PostgreSQL on port 15432.
 
 ### Test blocking detection
 
@@ -239,7 +252,7 @@ An automated test script creates a real blocking scenario and verifies detection
 node test/test-blocking.mjs
 ```
 
-### Stop MySQL
+### Stop databases
 
 ```bash
 docker compose down
@@ -258,25 +271,33 @@ engines:
   mysql-prod:
     type: mysql
     url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true
+
+  postgres-prod:
+    type: postgres
+    url: postgresql://readonly:***@prod-db.internal:5432/app_db?sslmode=require
 ```
 
-The `url` field takes priority over individual fields. Supported URL params:
+The `url` field takes priority over individual fields. MySQL supports additional URL params:
 - `ssl=true` — enable SSL with certificate verification
 - `ssl={"rejectUnauthorized":false}` — custom SSL options (JSON)
 - `connectionLimit=10` — pool size (default: 5)
+
+PostgreSQL URLs are passed directly to `pg.Pool({ connectionString })`, so any `pg`-supported parameter works (`sslmode`, `connect_timeout`, etc.).
 
 ### Individual fields (legacy)
 
 ```yaml
 engines:
   <engine-id>:
-    type: mysql          # Engine type (only mysql supported currently)
-    host: 127.0.0.1      # Hostname or IP
-    port: 3306            # Port
-    user: root            # Database user
-    password: secret      # Password
-    database: mydb        # Default database
+    type: mysql          # or postgres, sqlserver, oracle, mongodb
+    host: 127.0.0.1      # Hostname or IP (MySQL only)
+    port: 3306            # Port (MySQL only)
+    user: root            # Database user (MySQL only)
+    password: secret      # Password (MySQL only)
+    database: mydb        # Default database (MySQL only)
 ```
+
+Note: Individual fields are only supported for MySQL. PostgreSQL requires a connection URL (`url` field).
 
 Multiple engines are supported:
 
@@ -292,6 +313,9 @@ engines:
     user: readonly
     password: ${MYSQL_STAGING_PASSWORD}
     database: app_db
+  postgres-analytics:
+    type: postgres
+    url: postgresql:***@analytics-db.internal:5432/warehouse?sslmode=require
 ```
 
 **Security:** Add `config.yaml` to `.gitignore` (already included by default).
@@ -307,19 +331,21 @@ src/
   types.ts              Shared TypeScript types
   connectors/
     mysql.ts            MySQLConnector (implements DatabaseConnector)
+    postgres.ts          PostgreSQLConnector (implements DatabaseConnector)
   tools/
     blocking-chains.ts  MCP tool definition + handler
 ```
 
-- **DatabaseConnector interface** — standard commands (`databases`, `tables`, `describe`, `indexes`, `processes`, `query`) that work across engines. Add PostgreSQL or SQL Server by implementing the interface.
-- **Lazy imports** — MCP SDK and mysql2 are loaded dynamically only when needed. CLI commands like `list-engines` start instantly without loading database drivers.
-- **Lazy connection pools** — MySQL connections are created on first use, not at startup.
+- **DatabaseConnector interface** — standard commands (`databases`, `tables`, `describe`, `indexes`, `processes`, `query`) that work across engines. MySQL and PostgreSQL are implemented; SQL Server, Oracle, and MongoDB are planned.
+- **Lazy imports** — MCP SDK, mysql2, and pg are loaded dynamically only when needed. CLI commands like `list-engines` start instantly without loading database drivers.
+- **Lazy connection pools** — Database connections are created on first use, not at startup.
 - **One tool per file** — `src/tools/blocking-chains.ts` is self-contained (schema + handler). Adding a new tool means adding a new file and registering it in `server.ts`.
 
 ## Requirements
 
 - Node.js 18+
 - MySQL 8.0+ (with `performance_schema` enabled, which is the default)
+- PostgreSQL 12+ (for PostgreSQL connector)
 
 ## License
 

@@ -192,6 +192,7 @@
     .badge-mcp { background: #7c3aed33; color: #a78bfa; }
     .badge-cli { background: #14b8a633; color: #14b8a6; }
     .badge-mysql { background: #3b82f633; color: #60a5fa; }
+    .badge-postgres { background: #3b82f633; color: #60a5fa; }
     .badge-agnostic { background: #22c55e33; color: #4ade80; }
     .callout {
       padding: 16px 20px;
@@ -359,7 +360,11 @@ npm run repl</code></pre>
           <h4>One-shot CLI</h4>
           <p>Scriptable automation</p>
           <pre><code>node dist/index.js connect \
-  'mysql://user:***@host:3306/db'</code></pre>
+  'mysql://user:***@host:3306/db'
+
+# PostgreSQL
+node dist/index.js connect \
+  'postgresql:***@host:5432/db'</code></pre>
         </div>
         <div class="card">
           <h4>MCP Server</h4>
@@ -382,13 +387,18 @@ npm run build</code></pre>
       <pre><code>engines:
   mysql-prod:
     type: mysql
-    url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true</code></pre>
-      <p>The <code>url</code> field takes priority over individual fields. Supported URL params:</p>
+    url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true
+
+  postgres-prod:
+    type: postgres
+    url: postgresql:***@prod-db.internal:5432/app_db?sslmode=require</code></pre>
+      <p>The <code>url</code> field takes priority over individual fields. MySQL supports additional URL params:</p>
       <ul>
         <li><code>ssl=true</code> — enable SSL with certificate verification</li>
         <li><code>ssl={"rejectUnauthorized":false}</code> — custom SSL options (JSON)</li>
         <li><code>connectionLimit=10</code> — pool size (default: 5)</li>
       </ul>
+      <p>PostgreSQL URLs are passed directly to <code>pg.Pool({ connectionString })</code>, so any <code>pg</code>-supported parameter works (<code>sslmode</code>, <code>connect_timeout</code>, etc.).</p>
 
       <h4>Individual fields (legacy)</h4>
       <pre><code>engines:
@@ -411,8 +421,15 @@ npm run build</code></pre>
 
       <h2 id="connect">connect</h2>
       <span class="badge badge-cli">CLI</span>
-      <p>Connect to a database via URL and open an interactive REPL. No config file needed.</p>
-      <pre><code>npm run connect -- 'mysql://root:***@127.0.0.1:3306/mydb'</code></pre>
+      <p>Connect to a database via URL and open an interactive REPL. No config file needed. Supports <code>mysql://</code>, <code>postgresql://</code>, and <code>postgres://</code> URL schemes.</p>
+      <pre><code><span class="cmd-comment"># MySQL</span>
+npm run connect -- 'mysql://root:***@127.0.0.1:3306/mydb'
+
+<span class="cmd-comment"># PostgreSQL</span>
+npm run connect -- 'postgresql:***@127.0.0.1:5432/mydb'
+
+<span class="cmd-comment"># With --type override</span>
+npm run connect -- 'postgresql:***@host:5432/db' --type postgres</code></pre>
       <p>This connects, verifies the connection, then drops you into the REPL where you can run <code>databases</code>, <code>tables</code>, <code>describe</code>, <code>indexes</code>, <code>processes</code>, etc.</p>
 
       <h2 id="list-engines">list-engines</h2>
@@ -441,8 +458,9 @@ npm run blocking-chains -- mysql-primary -- --json</code></pre>
       <div class="repl-demo">
         <span class="prompt">AI-DBA REPL</span> — type 'help' for commands<br>
         <span class="output">No engines configured. Use: connect &lt;url&gt;</span><br><br>
-        <span class="prompt">ai-dba[no-engine]&gt;</span> connect mysql://root:***@127.0.0.1:13306/testdb<br>
-        <span class="output">Connected to 127.0.0.1-testdb</span><br><br>
+        <span class="prompt">ai-dba[no-engine]></span> connect mysql://root:***@127.0.0.1:13306/testdb<br>
+        <span class="output">Connected to 127.0.0.1-testdb</span><br>
+        <span class="cmd-comment"># or PostgreSQL: connect postgresql://postgres:***@127.0.0.1:15432/testdb</span><br><br>
         <span class="prompt">ai-dba[127.0.0.1-testdb]&gt;</span> databases<br>
         <span class="table-output">
 ┌────────────────────┐<br>
@@ -632,12 +650,13 @@ ai-dba[mysql-test]> SELECT * FROM users LIMIT 10</code></pre>
       <!-- ═══════════════════════════════════════════ -->
 
       <h2 id="docker-setup">Docker Test Environment</h2>
-      <p>A Docker Compose file is included for local testing with MySQL 8.0.</p>
+      <p>A Docker Compose file is included for local testing with MySQL 8.0 and PostgreSQL 16.</p>
 
-      <h4>Start MySQL</h4>
+      <h4>Start databases</h4>
       <pre><code>docker compose up -d</code></pre>
-      <p>Wait until healthy:</p>
+      <p>Wait until both are healthy:</p>
       <pre><code>docker inspect --format='{{.State.Health.Status}}' ai-dba-mysql-test
+docker inspect --format='{{.State.Health.Status}}' ai-dba-postgres-test
 <span class="cmd-comment"># Repeat until "healthy"</span></code></pre>
 
       <h4>Seed test data</h4>
@@ -650,7 +669,7 @@ ai-dba[mysql-test]> SELECT * FROM users LIMIT 10</code></pre>
       INSERT IGNORE INTO blocking_test (name, value)
       VALUES ('alpha', 1), ('beta', 2), ('gamma', 3);"</code></pre>
 
-      <h4>Stop MySQL</h4>
+      <h4>Stop databases</h4>
       <pre><code>docker compose down    <span class="cmd-comment"># Stop containers</span>
 docker compose down -v <span class="cmd-comment"># Stop and delete data</span></code></pre>
 
@@ -683,16 +702,17 @@ docker compose down -v <span class="cmd-comment"># Stop and delete data</span></
       <div class="arch-block">  <span class="file">connector.ts</span>     <span class="desc">— DatabaseConnector interface (engine-agnostic)</span></div>
       <div class="arch-block">  <span class="file">types.ts</span>         <span class="desc">— Shared TypeScript types</span></div>
       <div class="arch-block">  <span class="dir">connectors/</span></div>
-      <div class="arch-block">    <span class="file">mysql.ts</span>       <span class="desc">— MySQLConnector (implements DatabaseConnector)</span></div>
+      <div class="arch-block">    <span class="file">mysql.ts</span> <span class="desc">— MySQLConnector (implements DatabaseConnector)</span></div>
+      <div class="arch-block">    <span class="file">postgres.ts</span> <span class="desc">— PostgreSQLConnector (implements DatabaseConnector)</span></div>
       <div class="arch-block">  <span class="dir">tools/</span></div>
       <div class="arch-block">    <span class="file">blocking-chains.ts</span> <span class="desc">— MCP tool schema + handler</span></div>
 
       <h4>Design decisions</h4>
       <ul>
-        <li><strong>DatabaseConnector interface</strong> — standard commands (<code>databases</code>, <code>tables</code>, <code>describe</code>, <code>indexes</code>, <code>processes</code>, <code>query</code>) that work across engines. Add PostgreSQL or SQL Server by implementing the interface.</li>
-        <li><strong>Connection URLs</strong> — Connect directly via <code>mysql://user:***@host:port/db?ssl=true</code> without a config file.</li>
-        <li><strong>Lazy imports</strong> — MCP SDK and mysql2 are loaded dynamically. CLI commands like <code>list-engines</code> start instantly without loading database drivers.</li>
-        <li><strong>Lazy connection pools</strong> — MySQL connections are created on first use, not at startup.</li>
+        <li><strong>DatabaseConnector interface</strong> — standard commands (<code>databases</code>, <code>tables</code>, <code>describe</code>, <code>indexes</code>, <code>processes</code>, <code>query</code>) that work across engines. MySQL and PostgreSQL are implemented; SQL Server, Oracle, and MongoDB are planned.</li>
+        <li><strong>Connection URLs</strong> — Connect directly via <code>mysql://</code> or <code>postgresql://</code> URLs without a config file.</li>
+        <li><strong>Lazy imports</strong> — MCP SDK, mysql2, and pg are loaded dynamically. CLI commands like <code>list-engines</code> start instantly without loading database drivers.</li>
+        <li><strong>Lazy connection pools</strong> — Database connections are created on first use, not at startup.</li>
         <li><strong>One tool per file</strong> — Adding a new tool means adding a new file and registering it in <code>server.ts</code>.</li>
         <li><strong>Raw data only</strong> — The tool returns blocking chain facts. AI agents provide recommendations.</li>
         <li><strong>isError: true</strong> — Standard MCP error pattern with human-readable messages.</li>
@@ -722,7 +742,7 @@ docker compose down -v <span class="cmd-comment"># Stop and delete data</span></
         <thead><tr><th>Scenario</th><th>Response</th></tr></thead>
         <tbody>
           <tr><td>Unknown engine ID</td><td><code>Unknown engine "x". Available: mysql-primary</code></td></tr>
-          <tr><td>Unsupported engine type</td><td><code>Engine "x" is type "postgres". Only MySQL is currently supported.</code></td></tr>
+          <tr><td>Unsupported engine type</td><td><code>Engine "x" is type "postgres". Only MySQL blocking chains are currently supported.</code></td></tr>
           <tr><td>Config file not found</td><td><code>Config file not found: /path/to/config.yaml</code></td></tr>
           <tr><td>performance_schema disabled</td><td><code>performance_schema is disabled on engine "x". Enable it with: SET GLOBAL performance_schema = ON;</code></td></tr>
           <tr><td>Connection refused</td><td><code>Connection error on engine "x": ECONNREFUSED 127.0.0.1:3306</code></td></tr>
@@ -731,7 +751,7 @@ docker compose down -v <span class="cmd-comment"># Stop and delete data</span></
 
       <div class="callout callout-info" style="margin-top: 40px;">
         <div class="callout-title">Requirements</div>
-        <p>Node.js 18+ and MySQL 8.0+ (with <code>performance_schema</code> enabled, which is the default).</p>
+        <p>Node.js 18+, MySQL 8.0+ (with <code>performance_schema</code> enabled), and/or PostgreSQL 12+.</p>
       </div>
     </main>
   </div>
