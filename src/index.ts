@@ -630,8 +630,9 @@ async function startRepl(
     const cmd = parts[0].toLowerCase();
     const args = parts.slice(1);
 
-    // Resolve aliases, then check if it's a SQL keyword
-    const resolved = aliases[cmd] ?? (sqlKeywords.includes(cmd) ? "sql" : cmd);
+    // Resolve aliases, then check if it's a REPL command, then SQL keyword
+    const aliased = aliases[cmd];
+    const resolved = aliased ?? (commands[cmd] ? cmd : (sqlKeywords.includes(cmd) ? "sql" : cmd));
     const command = commands[resolved];
 
     // For sql command via auto-route, pass the entire input as args

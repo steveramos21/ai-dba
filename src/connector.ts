@@ -56,6 +56,15 @@ export interface QueryResult {
   affectedRows?: number;
 }
 
+export interface BlockingChainInfo {
+  blocking_pid: number;
+  blocked_pid: number;
+  wait_event: string | null;
+  database_name: string | null;
+  blocking_query: string | null;
+  blocked_query: string | null;
+}
+
 /**
  * Connector interface — one per database engine type.
  * The REPL routes standard commands to the active engine's connector.

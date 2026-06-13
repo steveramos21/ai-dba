@@ -1,7 +1,5 @@
-import mysql, { type Pool, type PoolConnection, type RowDataPacket, type SslOptions } from "mysql2/promise";
+import mysql, { type Pool, type RowDataPacket } from "mysql2/promise";
 import type { EngineConfig } from "../config.js";
-import { resolveMysqlConfig } from "../config.js";
-import type { BlockingChain } from "../types.js";
 import type {
   DatabaseConnector,
   DatabaseInfo,
@@ -12,273 +10,220 @@ import type {
   QueryResult,
 } from "../connector.js";
 
-// ─── Lazy pool management ─────────────────────────────────────
-
-const pools = new Map<string, Pool>();
-
-function getPool(engineId: string, config: EngineConfig): Pool {
-  const existing = pools.get(engineId);
-  if (existing) return existing;
-
-  const resolved = resolveMysqlConfig(engineId, config);
-  const ssl = resolved.ssl === true ? ("VERIFY_IDENTITY" as string) : (resolved.ssl as SslOptions | string | undefined);
-  const { ssl: _ssl, ...rest } = resolved;
-  const poolConfig: mysql.PoolOptions = { ...rest, ssl };
-  const pool = mysql.createPool(poolConfig);
-
-  pools.set(engineId, pool);
-  return pool;
-}
-
-// ─── MySQL connector ───────────────────────────────────────────
-
 export class MySQLConnector implements DatabaseConnector {
+  private pools: Map<string, Pool> = new Map();
+
+  getPool(engineId: string, config: EngineConfig): Pool {
+    let pool = this.pools.get(engineId);
+    if (!pool) {
+      if (config.url) {
+        pool = mysql.createPool(config.url);
+      } else {
+        pool = mysql.createPool({
+          host: config.host,
+          port: config.port,
+          user: config.user,
+          password: config.password,
+          database: config.database,
+          ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
+        });
+      }
+      this.pools.set(engineId, pool);
+    }
+    return pool;
+  }
+
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
-    const pool = getPool(engineId, config);
-    const conn = await pool.getConnection();
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
     try {
-      const [rows] = await conn.execute<RowDataPacket[]>("SHOW DATABASES");
+      const [rows] = await connection.query<RowDataPacket[]>(
+        "SELECT SCHEMA_NAME as name, DEFAULT_CHARACTER_SET_NAME as charset, DEFAULT_COLLATION_NAME as collation FROM INFORMATION_SCHEMA.SCHEMATA"
+      );
       return rows.map((row) => ({
-        name: row.Database as string,
+        name: row.name,
+        charset: row.charset,
+        collation: row.collation,
       }));
     } finally {
-      conn.release();
+      connection.release();
     }
   }
 
-  async listTables(engineId: string, config: EngineConfig, database?: string): Promise<TableInfo[]> {
-    const pool = getPool(engineId, config);
-    const conn = await pool.getConnection();
+  async listTables(engineId: string, config: EngineConfig): Promise<TableInfo[]> {
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
     try {
-      if (database) {
-        await conn.execute(`USE ??`, [database]);
-      }
-      const [rows] = await conn.execute<RowDataPacket[]>(
-        `SELECT TABLE_NAME, TABLE_ROWS, DATA_LENGTH, ENGINE, TABLE_COLLATION, TABLE_COMMENT
-         FROM information_schema.TABLES
-         WHERE TABLE_SCHEMA = DATABASE()`
+      const [rows] = await connection.query<RowDataPacket[]>(
+        "SELECT TABLE_NAME as name, TABLE_ROWS as `rows`, DATA_LENGTH as sizeBytes, ENGINE as engine, TABLE_COLLATION as collation FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?",
+        [config.database]
       );
       return rows.map((row) => ({
-        name: row.TABLE_NAME as string,
-        rows: row.TABLE_ROWS as number,
-        sizeBytes: row.DATA_LENGTH as number,
-        engine: row.ENGINE as string,
-        collation: row.TABLE_COLLATION as string,
-        comment: row.TABLE_COMMENT as string,
+        name: row.name,
+        rows: row.rows,
+        sizeBytes: row.sizeBytes,
+        engine: row.engine,
+        collation: row.collation,
       }));
     } finally {
-      conn.release();
+      connection.release();
     }
   }
 
-  async describeTable(engineId: string, config: EngineConfig, table: string, database?: string): Promise<ColumnInfo[]> {
-    const pool = getPool(engineId, config);
-    const conn = await pool.getConnection();
+  async describeTable(engineId: string, config: EngineConfig, tableName: string): Promise<ColumnInfo[]> {
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
     try {
-      if (database) {
-        await conn.execute(`USE ??`, [database]);
-      }
-      const [rows] = await conn.execute<RowDataPacket[]>(
-        `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_KEY, EXTRA, COLUMN_COMMENT
-         FROM information_schema.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-         ORDER BY ORDINAL_POSITION`,
-        [table]
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT
+          COLUMN_NAME as name,
+          COLUMN_TYPE as type,
+          IS_NULLABLE as nullable,
+          COLUMN_KEY as \`key\`,
+          COLUMN_DEFAULT as default_value,
+          EXTRA as extra,
+          COLUMN_COMMENT as comment
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`,
+        [config.database, tableName]
       );
-      return rows.map((row) => ({
-        name: row.COLUMN_NAME as string,
-        type: row.COLUMN_TYPE as string,
-        nullable: row.IS_NULLABLE === "YES",
-        defaultValue: row.COLUMN_DEFAULT as string | null,
-        isPrimary: row.COLUMN_KEY === "PRI",
-        isAutoIncrement: (row.EXTRA as string).includes("auto_increment"),
-        comment: row.COLUMN_COMMENT as string,
+      return rows.map((row: any) => ({
+        name: row.name,
+        type: row.type,
+        nullable: row.nullable === "YES",
+        isPrimary: row.key === "PRI",
+        isAutoIncrement: (row.extra as string)?.includes("auto_increment") ?? false,
+        defaultValue: row.default_value,
+        comment: row.comment,
       }));
     } finally {
-      conn.release();
+      connection.release();
     }
   }
 
-  async listIndexes(engineId: string, config: EngineConfig, table: string, database?: string): Promise<IndexInfo[]> {
-    const pool = getPool(engineId, config);
-    const conn = await pool.getConnection();
+  async listIndexes(engineId: string, config: EngineConfig, tableName: string): Promise<IndexInfo[]> {
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
     try {
-      if (database) {
-        await conn.execute(`USE ??`, [database]);
-      }
-      const [rows] = await conn.execute<RowDataPacket[]>(
-        `SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE, SEQ_IN_INDEX, INDEX_TYPE
-         FROM information_schema.STATISTICS
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-         ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
-        [table]
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT
+          s.INDEX_NAME as name,
+          s.TABLE_NAME as table_name,
+          GROUP_CONCAT(s.COLUMN_NAME ORDER BY s.SEQ_IN_INDEX) as columns_csv,
+          s.NON_UNIQUE as non_unique,
+          s.INDEX_TYPE as index_type
+        FROM INFORMATION_SCHEMA.STATISTICS s
+        WHERE s.TABLE_SCHEMA = ? AND s.TABLE_NAME = ?
+        GROUP BY s.INDEX_NAME, s.TABLE_NAME, s.NON_UNIQUE, s.INDEX_TYPE
+        ORDER BY s.INDEX_NAME`,
+        [config.database, tableName]
       );
-      // Group by index name
-      const indexMap = new Map<string, { columns: string[]; isUnique: boolean; type: string }>();
-      for (const row of rows) {
-        const idxName = row.INDEX_NAME as string;
-        if (!indexMap.has(idxName)) {
-          indexMap.set(idxName, {
-            columns: [],
-            isUnique: !(row.NON_UNIQUE as number),
-            type: row.INDEX_TYPE as string,
-          });
-        }
-        indexMap.get(idxName)!.columns.push(row.COLUMN_NAME as string);
-      }
-      return Array.from(indexMap.entries()).map(([name, info]) => ({
-        name,
-        table,
-        columns: info.columns,
-        isUnique: info.isUnique,
-        isPrimary: name === "PRIMARY",
-        type: info.type,
+      return rows.map((row: any) => ({
+        name: row.name,
+        table: row.table_name,
+        columns: row.columns_csv ? row.columns_csv.split(",") : [],
+        isUnique: row.non_unique === 0,
+        isPrimary: row.name === "PRIMARY",
+        type: row.index_type,
       }));
     } finally {
-      conn.release();
+      connection.release();
     }
   }
 
   async listProcesses(engineId: string, config: EngineConfig): Promise<ProcessInfo[]> {
-    const pool = getPool(engineId, config);
-    const conn = await pool.getConnection();
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
     try {
-      const [rows] = await conn.execute<RowDataPacket[]>("SHOW PROCESSLIST");
-      return rows.map((row) => ({
-        pid: row.Id as number,
-        user: row.User as string,
-        host: row.Host as string,
-        database: row.db as string | null,
-        command: row.Command as string,
-        time: row.Time as number,
-        state: row.State as string | null,
-        query: row.Info as string | null,
+      const [rows] = await connection.query<RowDataPacket[]>(
+        "SELECT ID as pid, USER as user, HOST as host, DB as database, COMMAND as command, TIME as time, STATE as state, INFO as query FROM INFORMATION_SCHEMA.PROCESSLIST WHERE ID != CONNECTION_ID()"
+      );
+      return rows.map((row: any) => ({
+        pid: row.pid,
+        user: row.user,
+        host: row.host,
+        database: row.database ?? null,
+        command: row.command,
+        time: row.time,
+        state: row.state ?? null,
+        query: row.query ?? null,
       }));
     } finally {
-      conn.release();
+      connection.release();
     }
   }
 
   async query(engineId: string, config: EngineConfig, sql: string): Promise<QueryResult> {
-    const pool = getPool(engineId, config);
-    const conn = await pool.getConnection();
+    // Guardrail: only allow read-only queries for now
+    const sqlUpper = sql.trim().toUpperCase();
+    if (!(
+      sqlUpper.startsWith("SELECT") ||
+      sqlUpper.startsWith("WITH") ||
+      sqlUpper.startsWith("SHOW") ||
+      sqlUpper.startsWith("EXPLAIN") ||
+      sqlUpper.startsWith("DESCRIBE") ||
+      sqlUpper.startsWith("DESC")
+    )) {
+      throw new Error("Only read-only queries (SELECT, WITH, SHOW, EXPLAIN, DESCRIBE, DESC) are allowed for now.");
+    }
+
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
     try {
-      const [result] = await conn.execute(sql);
-
-      if (Array.isArray(result)) {
-        const rows = result as RowDataPacket[];
-        if (rows.length === 0) {
-          return { columns: [], rows: [] };
+      const [rows, fields] = await connection.query<RowDataPacket[]>(sql);
+      const columns = fields.map((f) => f.name);
+      const rowRecords = (rows as any[]).map((row) => {
+        const record: Record<string, unknown> = {};
+        for (const col of columns) {
+          record[col] = row[col];
         }
-        const columns = Object.keys(rows[0]);
-        return {
-          columns,
-          rows: rows.map((row) => {
-            const obj: Record<string, unknown> = {};
-            for (const col of columns) {
-              obj[col] = (row as Record<string, unknown>)[col];
-            }
-            return obj;
-          }),
-        };
-      }
-
-      const ok = result as { affectedRows?: number; insertId?: number; changedRows?: number };
-      return {
-        columns: ["affectedRows", "insertId", "changedRows"],
-        rows: [{ affectedRows: ok.affectedRows ?? 0, insertId: ok.insertId ?? 0, changedRows: ok.changedRows ?? 0 }],
-        affectedRows: ok.affectedRows,
-      };
+        return record;
+      });
+      return { columns, rows: rowRecords };
     } finally {
-      conn.release();
+      connection.release();
     }
   }
 
   async closeAllPools(): Promise<void> {
-    const closers: Promise<void>[] = [];
-    for (const [id, pool] of pools) {
-      closers.push(pool.end().then(() => { pools.delete(id); }));
+    for (const pool of this.pools.values()) {
+      await pool.end();
     }
-    await Promise.all(closers);
+    this.pools.clear();
   }
 }
 
-// ─── Legacy exports (blocking-chains tool still uses these) ────
+export const mysqlConnector = new MySQLConnector();
 
-const connector = new MySQLConnector();
-
-/** Close all MySQL connection pools. */
-export const closeAllPools = () => connector.closeAllPools();
-
-/** @deprecated Use connector.listProcesses() instead */
-export async function getBlockingChainsMySQL(
-  engineId: string,
-  config: EngineConfig
-): Promise<BlockingChain[]> {
-  const pool = getPool(engineId, config);
-  const conn = await pool.getConnection();
-
+export async function getBlockingChainsMySQL(engineId: string, config: EngineConfig) {
+  const pool = mysqlConnector.getPool(engineId, config);
+  const connection = await pool.getConnection();
   try {
-    const psEnabled = await checkPerformanceSchema(conn);
-    if (!psEnabled) {
-      const resolved = resolveMysqlConfig(engineId, config);
-      throw new Error(
-        `MySQL engine "${engineId}" (${resolved.host}:${resolved.port}): ` +
-        `performance_schema is DISABLED. Enable it with SET GLOBAL performance_schema=ON and restart MySQL.`
-      );
-    }
-
-    const [rows] = await conn.execute<RowDataPacket[]>(`
-      SELECT
-        blocking_th.PROCESSLIST_ID AS blocking_pid,
-        requesting_th.PROCESSLIST_ID AS blocked_pid,
-        dlw.REQUESTING_ENGINE_TRANSACTION_ID AS requesting_trx_id,
-        dlw.BLOCKING_ENGINE_TRANSACTION_ID AS blocking_trx_id,
-        blocking_sql.SQL_TEXT AS blocking_query,
-        blocked_sql.SQL_TEXT AS blocked_query,
-        requesting_th.PROCESSLIST_DB AS database_name,
-        requesting_th.PROCESSLIST_STATE AS status,
-        requesting_th.PROCESSLIST_HOST AS host_name,
-        blocking_th.PROCESSLIST_COMMAND AS blocking_command,
-        blocking_th.PROCESSLIST_TIME AS blocking_time_sec,
-        requesting_th.PROCESSLIST_COMMAND AS blocked_command
-      FROM performance_schema.data_lock_waits dlw
-      INNER JOIN performance_schema.threads blocking_th
-        ON dlw.BLOCKING_THREAD_ID = blocking_th.THREAD_ID
-      INNER JOIN performance_schema.threads requesting_th
-        ON dlw.REQUESTING_THREAD_ID = requesting_th.THREAD_ID
-      LEFT JOIN performance_schema.events_statements_current blocking_sql
-        ON blocking_th.THREAD_ID = blocking_sql.THREAD_ID
-      LEFT JOIN performance_schema.events_statements_current blocked_sql
-        ON requesting_th.THREAD_ID = blocked_sql.THREAD_ID
-    `);
-
-    return rows.map((row) => ({
-      engine_id: engineId,
-      blocking_pid: row.blocking_pid ?? 0,
-      blocked_pid: row.blocked_pid ?? 0,
-      wait_duration_ms: 0,
-      wait_event: "lock_wait",
+    const [rows] = await connection.query<RowDataPacket[]>(
+      `SELECT
+        r.trx_mysql_thread_id as blocking_pid,
+        r.trx_mysql_thread_id as blocked_pid,
+        r.trx_state as wait_event,
+        r.trx_tables_locked as database_name,
+        r.trx_query as blocking_query,
+        r.trx_query as blocked_query
+      FROM INFORMATION_SCHEMA.INNODB_LOCK_WAITS w
+      JOIN INFORMATION_SCHEMA.INNODB_TRX b ON b.trx_id = w.blocking_trx_id
+      JOIN INFORMATION_SCHEMA.INNODB_TRX r ON r.trx_id = w.requesting_trx_id`
+    );
+    return rows.map((row: any) => ({
+      blocking_pid: row.blocking_pid,
+      blocked_pid: row.blocked_pid,
+      wait_event: row.wait_event ?? null,
+      database_name: row.database_name ?? null,
       blocking_query: row.blocking_query ?? null,
       blocked_query: row.blocked_query ?? null,
-      database_name: row.database_name ?? null,
-      wait_type: row.blocking_command ? `${row.blocking_command} holding lock` : null,
-      status: row.status ?? null,
-      host_name: row.host_name ?? null,
-      program_name: row.blocked_command ?? null,
-      login_time: row.blocking_time_sec != null ? `${row.blocking_time_sec}s` : null,
     }));
   } finally {
-    conn.release();
+    connection.release();
   }
 }
 
-async function checkPerformanceSchema(conn: PoolConnection): Promise<boolean> {
-  const [rows] = await conn.execute<RowDataPacket[]>(
-    "SELECT @@performance_schema AS enabled"
-  );
-  return rows[0]?.enabled === 1;
+export async function closeAllPools() {
+  await mysqlConnector.closeAllPools();
 }
-
-// Singleton export for REPL to use
-export const mysqlConnector = connector;
