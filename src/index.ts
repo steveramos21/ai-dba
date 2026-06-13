@@ -165,7 +165,9 @@ program
         fn: async () => {
           console.log(chalk.bold("\nCommands:"));
           for (const [cmd, { desc }] of Object.entries(commands)) {
-            console.log(`  ${chalk.cyan(cmd.padEnd(20))} ${desc}`);
+            const alias = Object.entries(aliases).filter(([, v]) => v === cmd).map(([k]) => k);
+            const aliasStr = alias.length > 0 ? chalk.dim(` (${alias.join(", ")})`) : "";
+            console.log(`  ${chalk.cyan(cmd.padEnd(20))} ${desc}${aliasStr}`);
           }
           console.log();
         },
