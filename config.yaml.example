@@ -1,8 +1,25 @@
+# AI-DBA Configuration
+# Two formats supported:
+
+# 1. Connection URL (recommended — works with cloud providers)
 engines:
-  mysql-test:
+  mysql-prod:
+    type: mysql
+    url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true
+
+  # 2. Individual fields (legacy, for local/dev)
+  mysql-dev:
     type: mysql
     host: 127.0.0.1
-    port: 13306
+    port: 3306
     user: root
-    password: testpassword
-    database: testdb
+    password: ""
+    database: devdb
+
+  # 3. Connection URL with SSL options
+  mysql-aws:
+    type: mysql
+    url: mysql://admin:***@my-cluster.cluster-abc123.us-east-1.rds.amazonaws.com:3306/mydb?ssl={"rejectUnauthorized":false}
+
+  # Connection pool size (default: 5)
+  # connectionLimit: 10
