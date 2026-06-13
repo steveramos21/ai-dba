@@ -411,9 +411,9 @@ npm run build</code></pre>
 
       <h2 id="connect">connect</h2>
       <span class="badge badge-cli">CLI</span>
-      <p>Connect to a database via URL and run diagnostics. No config file needed.</p>
-      <pre><code>node dist/index.js connect 'mysql://root:***@127.0.0.1:3306/mydb'
-node dist/index.js connect 'mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true'</code></pre>
+      <p>Connect to a database via URL and open an interactive REPL. No config file needed.</p>
+      <pre><code>npm run connect -- 'mysql://root:***@127.0.0.1:3306/mydb'</code></pre>
+      <p>This connects, verifies the connection, then drops you into the REPL where you can run <code>databases</code>, <code>tables</code>, <code>describe</code>, <code>indexes</code>, <code>processes</code>, etc.</p>
 
       <h2 id="list-engines">list-engines</h2>
       <span class="badge badge-cli">CLI</span>

@@ -42,10 +42,11 @@ node dist/index.js repl
 # Then: connect mysql://root:password@127.0.0.1:3306/mydb
 ```
 
-Option C — **One-shot command**:
+Option C — **Connect via URL** (drops into REPL):
 
 ```bash
-node dist/index.js connect 'mysql://root:password@127.0.0.1:3306/mydb'
+npm run connect -- 'mysql://root:***@127.0.0.1:3306/mydb'
+# Connects and opens interactive REPL
 ```
 
 ## Commands
@@ -68,12 +69,13 @@ node dist/index.js connect 'mysql://root:password@127.0.0.1:3306/mydb'
 
 ### `connect <url>`
 
-Connect to a database via URL and run diagnostics. No config file needed.
+Connect to a database via URL and open an interactive REPL. No config file needed.
 
 ```bash
-ai-dba connect 'mysql://root:password@127.0.0.1:3306/mydb'
-ai-dba connect 'mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true'
+npm run connect -- 'mysql://root:***@127.0.0.1:3306/mydb'
 ```
+
+This connects, verifies the connection, then drops you into the REPL where you can run `databases`, `tables`, `describe`, `indexes`, `processes`, etc.
 
 ### `blocking-chains`
 

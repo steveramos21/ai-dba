@@ -12,6 +12,7 @@
     "serve": "node dist/index.js --config config.yaml serve",
     "blocking-chains": "node dist/index.js --config config.yaml blocking-chains",
     "list-engines": "node dist/index.js --config config.yaml list-engines",
+    "connect": "node dist/index.js --config config.yaml connect",
     "test": "vitest"
   },
   "dependencies": {
