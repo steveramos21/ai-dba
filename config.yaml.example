@@ -13,13 +13,5 @@ engines:
     host: 127.0.0.1
     port: 3306
     user: root
-    password: ""
-    database: devdb
-
-  # 3. Connection URL with SSL options
-  mysql-aws:
-    type: mysql
-    url: mysql://admin:***@my-cluster.cluster-abc123.us-east-1.rds.amazonaws.com:3306/mydb?ssl={"rejectUnauthorized":false}
-
-  # Connection pool size (default: 5)
-  # connectionLimit: 10
+    password: yourpassword
+    database: yourdb

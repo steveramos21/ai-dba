@@ -33,7 +33,7 @@
       width: 260px;
       background: var(--surface);
       border-right: 1px solid var(--border);
-      padding: 24px 0;
+      padding: 0 0 24px;
       position: fixed;
       top: 0;
       left: 0;
@@ -41,38 +41,68 @@
       overflow-y: auto;
     }
     nav .logo {
-      padding: 0 24px 24px;
+      padding: 20px 20px 16px;
       border-bottom: 1px solid var(--border);
-      margin-bottom: 16px;
+      margin-bottom: 8px;
     }
     nav .logo h1 {
-      font-size: 20px;
+      font-size: 18px;
       font-weight: 700;
       color: var(--accent);
     }
     nav .logo span {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--text-muted);
+    }
+    nav .group {
+      border-top: 1px solid var(--border);
+    }
+    nav .group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+    }
+    nav .group-header:hover {
+      background: var(--accent-bg);
+    }
+    nav .group-header .group-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+    nav .group-header .chevron {
+      font-size: 10px;
+      color: var(--text-muted);
+      transition: transform 0.2s;
+    }
+    nav .group.open .group-header .chevron {
+      transform: rotate(90deg);
+    }
+    nav .group-items {
+      display: none;
+    }
+    nav .group.open .group-items {
+      display: block;
     }
     nav a {
       display: block;
-      padding: 8px 24px;
+      padding: 6px 20px 6px 28px;
       color: var(--text-muted);
       text-decoration: none;
-      font-size: 14px;
+      font-size: 13px;
       transition: all 0.15s;
+      border-left: 2px solid transparent;
     }
     nav a:hover, nav a.active {
       color: var(--accent);
       background: var(--accent-bg);
-    }
-    nav .section {
-      padding: 16px 24px 4px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--text-muted);
+      border-left-color: var(--accent);
     }
     main {
       margin-left: 260px;
@@ -157,10 +187,12 @@
       font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
+      margin-right: 4px;
     }
     .badge-mcp { background: #7c3aed33; color: #a78bfa; }
     .badge-cli { background: #14b8a633; color: #14b8a6; }
     .badge-mysql { background: #3b82f633; color: #60a5fa; }
+    .badge-agnostic { background: #22c55e33; color: #4ade80; }
     .callout {
       padding: 16px 20px;
       border-radius: 8px;
@@ -174,7 +206,7 @@
     .callout p { margin-bottom: 4px; }
     .card-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }
@@ -182,12 +214,13 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 20px;
+      padding: 16px;
       transition: border-color 0.15s;
     }
     .card:hover { border-color: var(--accent); }
-    .card h4 { margin-top: 0; color: var(--accent); }
-    .card p { font-size: 14px; color: var(--text-muted); margin-bottom: 0; }
+    .card h4 { margin-top: 0; color: var(--accent); font-size: 15px; }
+    .card p { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+    .card pre { margin-bottom: 0; font-size: 12px; padding: 12px; }
     .arch-block {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -206,10 +239,15 @@
       border-radius: 8px;
       padding: 20px;
       margin-bottom: 20px;
+      font-size: 13px;
+      line-height: 1.5;
     }
     .repl-demo .prompt { color: var(--accent); }
     .repl-demo .output { color: var(--text-muted); }
     .repl-demo .table-output { color: var(--text); }
+    .cmd-group { margin-bottom: 32px; }
+    .cmd-group h3 { margin-bottom: 8px; }
+    .cmd-group h3 + p { margin-bottom: 12px; color: var(--text-muted); font-size: 14px; }
     @media (max-width: 768px) {
       nav { display: none; }
       main { margin-left: 0; padding: 24px; }
@@ -221,45 +259,111 @@
     <nav>
       <div class="logo">
         <h1>AI-DBA</h1>
-        <span>Universal Database Copilot v1.0</span>
+        <span>Universal Database Copilot</span>
       </div>
-      <div class="section">Getting Started</div>
-      <a href="#quick-start" class="active">Quick Start</a>
-      <a href="#installation">Installation</a>
-      <a href="#configuration">Configuration</a>
-      <div class="section">Commands</div>
-      <a href="#list-engines">list-engines</a>
-      <a href="#blocking-chains">blocking-chains</a>
-      <a href="#repl">repl</a>
-      <a href="#serve">serve</a>
-      <div class="section">MCP Integration</div>
-      <a href="#mcp-setup">Agent Setup</a>
-      <a href="#mcp-tool">blocking-chains Tool</a>
-      <div class="section">Testing</div>
-      <a href="#docker-setup">Docker Environment</a>
-      <a href="#e2e-test">End-to-End Test</a>
-      <div class="section">Reference</div>
-      <a href="#architecture">Architecture</a>
-      <a href="#output-fields">Output Fields</a>
-      <a href="#error-handling">Error Handling</a>
+
+      <div class="group open">
+        <div class="group-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="group-title">Getting Started</span>
+          <span class="chevron">&#9654;</span>
+        </div>
+        <div class="group-items">
+          <a href="#quick-start">Quick Start</a>
+          <a href="#installation">Installation</a>
+          <a href="#configuration">Configuration</a>
+        </div>
+      </div>
+
+      <div class="group open">
+        <div class="group-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="group-title">CLI Commands</span>
+          <span class="chevron">&#9654;</span>
+        </div>
+        <div class="group-items">
+          <a href="#connect">connect</a>
+          <a href="#list-engines">list-engines</a>
+          <a href="#blocking-chains">blocking-chains</a>
+          <a href="#repl">repl</a>
+          <a href="#serve">serve</a>
+        </div>
+      </div>
+
+      <div class="group open">
+        <div class="group-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="group-title">REPL Commands</span>
+          <span class="chevron">&#9654;</span>
+        </div>
+        <div class="group-items">
+          <a href="#repl-connect">connect</a>
+          <a href="#repl-databases">databases</a>
+          <a href="#repl-tables">tables</a>
+          <a href="#repl-describe">describe</a>
+          <a href="#repl-indexes">indexes</a>
+          <a href="#repl-processes">processes</a>
+          <a href="#repl-sql">sql</a>
+          <a href="#repl-other">Other</a>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="group-title">MCP Integration</span>
+          <span class="chevron">&#9654;</span>
+        </div>
+        <div class="group-items">
+          <a href="#mcp-setup">Agent Setup</a>
+          <a href="#mcp-tool">blocking-chains Tool</a>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="group-title">Testing</span>
+          <span class="chevron">&#9654;</span>
+        </div>
+        <div class="group-items">
+          <a href="#docker-setup">Docker Environment</a>
+          <a href="#e2e-test">End-to-End Test</a>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-header" onclick="this.parentElement.classList.toggle('open')">
+          <span class="group-title">Reference</span>
+          <span class="chevron">&#9654;</span>
+        </div>
+        <div class="group-items">
+          <a href="#architecture">Architecture</a>
+          <a href="#output-fields">Output Fields</a>
+          <a href="#error-handling">Error Handling</a>
+        </div>
+      </div>
     </nav>
 
     <main>
       <h2 id="quick-start">Quick Start</h2>
       <div class="card-grid">
         <div class="card">
-          <h4>Interactive REPL</h4>
-          <p>Explore databases with an interactive prompt</p>
-          <pre><code>npm run repl</code></pre>
+          <h4>Connect via URL</h4>
+          <p>No config file needed</p>
+          <pre><code>node dist/index.js repl
+# connect mysql://user:***@host:3306/db</code></pre>
         </div>
         <div class="card">
-          <h4>One-off Command</h4>
-          <p>Scriptable CLI for automation</p>
-          <pre><code>npm run blocking-chains -- mysql-primary</code></pre>
+          <h4>Config File</h4>
+          <p>Multiple engines, persistent</p>
+          <pre><code>cp config.yaml.example config.yaml
+npm run repl</code></pre>
+        </div>
+        <div class="card">
+          <h4>One-shot CLI</h4>
+          <p>Scriptable automation</p>
+          <pre><code>node dist/index.js connect \
+  'mysql://user:***@host:3306/db'</code></pre>
         </div>
         <div class="card">
           <h4>MCP Server</h4>
-          <p>Connect AI agents to your databases</p>
+          <p>For AI agents</p>
           <pre><code>npm run serve</code></pre>
         </div>
       </div>
@@ -273,9 +377,22 @@ npm run build</code></pre>
       <h2 id="configuration">Configuration</h2>
       <p>Create <code>config.yaml</code> from the example:</p>
       <pre><code>cp config.yaml.example config.yaml</code></pre>
-      <p>Then edit with your database credentials:</p>
+
+      <h4>Connection URL (recommended)</h4>
       <pre><code>engines:
-  mysql-primary:
+  mysql-prod:
+    type: mysql
+    url: mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true</code></pre>
+      <p>The <code>url</code> field takes priority over individual fields. Supported URL params:</p>
+      <ul>
+        <li><code>ssl=true</code> — enable SSL with certificate verification</li>
+        <li><code>ssl={"rejectUnauthorized":false}</code> — custom SSL options (JSON)</li>
+        <li><code>connectionLimit=10</code> — pool size (default: 5)</li>
+      </ul>
+
+      <h4>Individual fields (legacy)</h4>
+      <pre><code>engines:
+  mysql-dev:
     type: mysql
     host: 127.0.0.1
     port: 3306
@@ -288,55 +405,29 @@ npm run build</code></pre>
         <p><code>config.yaml</code> is in <code>.gitignore</code> by default. Never commit database credentials to version control.</p>
       </div>
 
-      <p>Multiple engines are supported:</p>
-      <pre><code>engines:
-  mysql-prod:
-    type: mysql
-    host: prod-db.internal
-    port: 3306
-    user: readonly
-    password: ${MYSQL_PROD_PASSWORD}
-    database: app_db
-  mysql-staging:
-    type: mysql
-    host: staging-db.internal
-    port: 3306
-    user: readonly
-    password: ${MYSQL_STAGING_PASSWORD}
-    database: app_db</code></pre>
+      <!-- ═══════════════════════════════════════════ -->
+      <!-- CLI COMMANDS                                 -->
+      <!-- ═══════════════════════════════════════════ -->
+
+      <h2 id="connect">connect</h2>
+      <span class="badge badge-cli">CLI</span>
+      <p>Connect to a database via URL and run diagnostics. No config file needed.</p>
+      <pre><code>node dist/index.js connect 'mysql://root:***@127.0.0.1:3306/mydb'
+node dist/index.js connect 'mysql://readonly:***@prod-db.internal:3306/app_db?ssl=true'</code></pre>
 
       <h2 id="list-engines">list-engines</h2>
       <span class="badge badge-cli">CLI</span>
       <p>List all configured database engines.</p>
       <pre><code>npm run list-engines</code></pre>
-      <p>Output:</p>
-      <pre><code>┌────────────┬───────┬───────────┬───────┬──────────┐
-│ ID         │ Type  │ Host      │ Port  │ Database │
-├────────────┼───────┼───────────┼───────┼──────────┤
-│ mysql-test │ mysql │ 127.0.0.1 │ 13306 │ testdb   │
-└────────────┴───────┴───────────┴───────┴──────────┘</code></pre>
 
       <h2 id="blocking-chains">blocking-chains</h2>
       <span class="badge badge-cli">CLI</span> <span class="badge badge-mcp">MCP</span> <span class="badge badge-mysql">MySQL</span>
-      <p>Detect and report row-level blocking chains using MySQL <code>performance_schema.data_lock_waits</code>.</p>
+      <p>Detect row-level blocking chains using MySQL <code>performance_schema.data_lock_waits</code>.</p>
+      <pre><code><span class="cmd-comment"># Table output</span>
+npm run blocking-chains -- mysql-primary
 
-      <h4>Table output</h4>
-      <pre><code>npm run blocking-chains -- mysql-primary</code></pre>
-
-      <h4>JSON output</h4>
-      <pre><code>npm run blocking-chains -- mysql-primary -- --json</code></pre>
-
-      <p>When blocking is detected:</p>
-      <pre><code>┌──────────────┬──────────────┬────────────┬──────────┬──────────────────────┬──────────────────────┐
-│ Blocking PID │ Blocked PID  │ Wait       │ Database │ Blocking Query       │ Blocked Query        │
-├──────────────┼──────────────┼────────────┼──────────┼──────────────────────┼──────────────────────┤
-│ 102          │ 103          │ lock_wait  │ testdb   │ UPDATE blocking_test │ UPDATE blocking_test │
-│              │              │            │          │ SET value = 999      │ SET value = 888     │
-└──────────────┴──────────────┴────────────┴──────────┴──────────────────────┴──────────────────────┘
-1 blocking chain(s) on mysql-primary</code></pre>
-
-      <p>When no blocking exists:</p>
-      <pre><code>No blocking chains found on mysql-primary</code></pre>
+<span class="cmd-comment"># JSON output</span>
+npm run blocking-chains -- mysql-primary -- --json</code></pre>
 
       <div class="callout callout-info">
         <div class="callout-title">Requirements</div>
@@ -345,43 +436,143 @@ npm run build</code></pre>
 
       <h2 id="repl">repl</h2>
       <span class="badge badge-cli">CLI</span>
-      <p>Interactive REPL for exploring database diagnostics.</p>
+      <p>Interactive REPL for exploring database diagnostics. Works with or without a config file.</p>
       <pre><code>npm run repl</code></pre>
       <div class="repl-demo">
-        <span class="prompt">AI-DBA REPL</span> — type a command or 'help'<br>
-        <span class="output">Engines: mysql-test</span><br><br>
-        <span class="prompt">ai-dba[mysql-test]&gt;</span> help<br>
-        <span class="output">Commands:</span><br>
-        <span class="output">  help                 Show available commands</span><br>
-        <span class="output">  engines              List configured engines</span><br>
-        <span class="output">  use                  Switch to engine (use &lt;engineId&gt;)</span><br>
-        <span class="output">  blocking-chains      Show current blocking chains</span><br>
-        <span class="output">  quit                 Exit the REPL</span><br><br>
-        <span class="prompt">ai-dba[mysql-test]&gt;</span> bc<br>
-        <span class="table-output">No blocking chains.</span><br><br>
-        <span class="prompt">ai-dba[mysql-test]&gt;</span> use mysql-primary<br>
-        <span class="output">Switched to mysql-primary</span><br><br>
-        <span class="prompt">ai-dba[mysql-primary]&gt;</span> quit<br>
+        <span class="prompt">AI-DBA REPL</span> — type 'help' for commands<br>
+        <span class="output">No engines configured. Use: connect &lt;url&gt;</span><br><br>
+        <span class="prompt">ai-dba[no-engine]&gt;</span> connect mysql://root:***@127.0.0.1:13306/testdb<br>
+        <span class="output">Connected to 127.0.0.1-testdb</span><br><br>
+        <span class="prompt">ai-dba[127.0.0.1-testdb]&gt;</span> databases<br>
+        <span class="table-output">
+┌────────────────────┐<br>
+│ Database           │<br>
+├────────────────────┤<br>
+│ information_schema │<br>
+│ testdb             │<br>
+└────────────────────┘<br>
+        </span>
+        <span class="output">2 database(s)</span><br><br>
+        <span class="prompt">ai-dba[127.0.0.1-testdb]&gt;</span> tables<br>
+        <span class="table-output">
+┌────────────────┬──────┬─────────┬─────────┬─────────────────────┐<br>
+│ Table          │ Rows │ Size    │ Engine  │ Collation           │<br>
+├────────────────┼──────┼─────────┼─────────┼─────────────────────┤<br>
+│ blocking_test  │ 3    │ 16.0 KB │ InnoDB  │ utf8mb4_0900_ai_ci  │<br>
+└────────────────┴──────┴─────────┴─────────┴─────────────────────┘<br>
+        </span>
+        <span class="output">1 table(s)</span><br><br>
+        <span class="prompt">ai-dba[127.0.0.1-testdb]&gt;</span> describe blocking_test<br>
+        <span class="table-output">
+┌─────────┬──────────────┬──────┬─────┬─────────┬────────────────┐<br>
+│ Column  │ Type         │ Null │ Key │ Default │ Extra          │<br>
+├─────────┼──────────────┼──────┼─────┼─────────┼────────────────┤<br>
+│ id      │ int          │ NO   │ PRI │ NULL    │ auto_increment │<br>
+│ name    │ varchar(100) │ YES  │     │ NULL    │                │<br>
+│ value   │ int          │ YES  │     │ NULL    │                │<br>
+└─────────┴──────────────┴──────┴─────┴─────────┴────────────────┘<br>
+        </span><br><br>
+        <span class="prompt">ai-dba[127.0.0.1-testdb]&gt;</span> quit<br>
         <span class="output">Bye.</span>
       </div>
-
-      <h4>REPL Commands</h4>
-      <table>
-        <thead><tr><th>Command</th><th>Alias</th><th>Description</th></tr></thead>
-        <tbody>
-          <tr><td><code>help</code></td><td></td><td>Show available commands</td></tr>
-          <tr><td><code>engines</code></td><td><code>ls</code></td><td>List configured engines (current marked with *)</td></tr>
-          <tr><td><code>use &lt;engineId&gt;</code></td><td></td><td>Switch to a different engine</td></tr>
-          <tr><td><code>blocking-chains</code></td><td><code>bc</code></td><td>Show blocking chains on current engine</td></tr>
-          <tr><td><code>quit</code></td><td><code>q</code>, <code>exit</code></td><td>Exit the REPL</td></tr>
-        </tbody>
-      </table>
 
       <h2 id="serve">serve</h2>
       <span class="badge badge-mcp">MCP</span>
       <p>Start the MCP server over stdio. Used by AI agents to call database diagnostics tools.</p>
       <pre><code>npm run serve</code></pre>
       <p>The server communicates via JSON-RPC over stdin/stdout. You typically don't run this directly — AI agents start it automatically.</p>
+
+      <!-- ═══════════════════════════════════════════ -->
+      <!-- REPL COMMAND REFERENCE                       -->
+      <!-- ═══════════════════════════════════════════ -->
+
+      <h2 id="repl-connect">connect</h2>
+      <p>Connect to a database via URL. No config file needed — the REPL starts with an empty engine list.</p>
+      <pre><code>ai-dba[no-engine]> connect mysql://root:***@127.0.0.1:13306/testdb
+Connected to 127.0.0.1-testdb
+  mysql://root:***@127.0.0.1:13306/testdb</code></pre>
+
+      <h2 id="repl-databases">databases <code>db</code></h2>
+      <span class="badge badge-agnostic">Engine-Agnostic</span>
+      <p>List all databases on the connected server.</p>
+      <pre><code>ai-dba[mysql-test]> databases
+┌────────────────────┐
+│ Database           │
+├────────────────────┤
+│ information_schema │
+│ testdb             │
+└────────────────────┘
+2 database(s)</code></pre>
+
+      <h2 id="repl-tables">tables <code>dt</code></h2>
+      <span class="badge badge-agnostic">Engine-Agnostic</span>
+      <p>List tables in the current database with row counts, sizes, engines, and collations.</p>
+      <pre><code>ai-dba[mysql-test]> tables
+┌────────────────┬──────┬─────────┬─────────┬─────────────────────┐
+│ Table          │ Rows │ Size    │ Engine  │ Collation           │
+├────────────────┼──────┼─────────┼─────────┼─────────────────────┤
+│ blocking_test  │ 3    │ 16.0 KB │ InnoDB  │ utf8mb4_0900_ai_ci  │
+└────────────────┴──────┴─────────┴─────────┴─────────────────────┘
+1 table(s)</code></pre>
+
+      <h2 id="repl-describe">describe <code>desc</code></h2>
+      <span class="badge badge-agnostic">Engine-Agnostic</span>
+      <p>Show column details for a table — type, nullable, primary key, default value, auto-increment.</p>
+      <pre><code>ai-dba[mysql-test]> describe blocking_test
+┌─────────┬──────────────┬──────┬─────┬─────────┬────────────────┐
+│ Column  │ Type         │ Null │ Key │ Default │ Extra          │
+├─────────┼──────────────┼──────┼─────┼─────────┼────────────────┤
+│ id      │ int          │ NO   │ PRI │ NULL    │ auto_increment │
+│ name    │ varchar(100) │ YES  │     │ NULL    │                │
+│ value   │ int          │ YES  │     │ NULL    │                │
+└─────────┴──────────────┴──────┴─────┴─────────┴────────────────┘</code></pre>
+
+      <h2 id="repl-indexes">indexes <code>idx</code></h2>
+      <span class="badge badge-agnostic">Engine-Agnostic</span>
+      <p>List indexes on a table — columns, uniqueness, primary key, index type.</p>
+      <pre><code>ai-dba[mysql-test]> indexes blocking_test
+┌─────────┬─────────┬────────┬─────────┐
+│ Index   │ Columns │ Unique │ Type    │
+├─────────┼─────────┼────────┼─────────┤
+│ PRIMARY  │ id      │ YES    │ BTREE   │
+└─────────┴─────────┴────────┴─────────┘</code></pre>
+
+      <h2 id="repl-processes">processes <code>ps</code></h2>
+      <span class="badge badge-agnostic">Engine-Agnostic</span>
+      <p>Show active database connections — PID, user, host, database, command, time, state.</p>
+      <pre><code>ai-dba[mysql-test]> processes
+┌──────┬──────┬──────────────────────┬─────────┬─────────┬──────┬─────────────┐
+│ PID  │ User │ Host                  │ DB      │ Command │ Time │ State       │
+├──────┼──────┼──────────────────────┼─────────┼─────────┼──────┼─────────────┤
+│ 5    │ root │ 172.23.0.1:54312      │ testdb  │ Query   │ 0s   │ starting    │
+└──────┴──────┴──────────────────────┴─────────┴─────────┴──────┴─────────────┘
+1 process(es)</code></pre>
+
+      <h2 id="repl-sql">sql</h2>
+      <p>Run a raw SQL query against the current engine. This is an engine-specific escape hatch — prefer the standard commands when available.</p>
+      <pre><code>ai-dba[mysql-test]> sql SHOW DATABASES
+ai-dba[mysql-test]> SELECT * FROM users LIMIT 10</code></pre>
+      <div class="callout callout-tip">
+        <div class="callout-title">Auto SQL Detection</div>
+        <p>SQL keywords like <code>SHOW DATABASES</code>, <code>SELECT * FROM users</code>, <code>DESCRIBE table_name</code> are automatically routed to the <code>sql</code> command. No need to prefix with <code>sql</code>.</p>
+      </div>
+
+      <h2 id="repl-other">Other REPL Commands</h2>
+      <table>
+        <thead><tr><th>Command</th><th>Alias</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>engines</code></td><td><code>ls</code></td><td>List configured engines (current marked with *)</td></tr>
+          <tr><td><code>use &lt;engineId&gt;</code></td><td></td><td>Switch to a different engine</td></tr>
+          <tr><td><code>blocking-chains</code></td><td><code>bc</code></td><td>Show blocking chains on current engine (MySQL)</td></tr>
+          <tr><td><code>status</code></td><td><code>s</code></td><td>Show connection details for current engine</td></tr>
+          <tr><td><code>help</code></td><td></td><td>Show available commands</td></tr>
+          <tr><td><code>quit</code></td><td><code>q</code>, <code>exit</code></td><td>Exit the REPL</td></tr>
+        </tbody>
+      </table>
+
+      <!-- ═══════════════════════════════════════════ -->
+      <!-- MCP INTEGRATION                             -->
+      <!-- ═══════════════════════════════════════════ -->
 
       <h2 id="mcp-setup">MCP Agent Setup</h2>
       <p>Add AI-DBA to your AI agent's MCP server configuration.</p>
@@ -436,25 +627,9 @@ npm run build</code></pre>
   }
 }</code></pre>
 
-      <p>Response (no blocking):</p>
-      <pre><code>{
-  "content": [
-    {
-      "type": "text",
-      "text": "No blocking chains found on engine \"mysql-primary\"."
-    }
-  ]
-}</code></pre>
-
-      <p>Response (blocking detected):</p>
-      <pre><code>{
-  "content": [
-    {
-      "type": "text",
-      "text": "[{\"engine_id\":\"mysql-primary\",\"blocking_pid\":102,\"blocked_pid\":103,...}]"
-    }
-  ]
-}</code></pre>
+      <!-- ═══════════════════════════════════════════ -->
+      <!-- TESTING                                      -->
+      <!-- ═══════════════════════════════════════════ -->
 
       <h2 id="docker-setup">Docker Test Environment</h2>
       <p>A Docker Compose file is included for local testing with MySQL 8.0.</p>
@@ -496,19 +671,26 @@ docker compose down -v <span class="cmd-comment"># Stop and delete data</span></
         <p>Docker MySQL must be running and seeded before running the test script. See <a href="#docker-setup">Docker Environment</a> above.</p>
       </div>
 
+      <!-- ═══════════════════════════════════════════ -->
+      <!-- REFERENCE                                    -->
+      <!-- ═══════════════════════════════════════════ -->
+
       <h2 id="architecture">Architecture</h2>
       <div class="arch-block"><span class="dir">src/</span></div>
       <div class="arch-block">  <span class="file">index.ts</span>        <span class="desc">— CLI entry point (commander, REPL)</span></div>
       <div class="arch-block">  <span class="file">server.ts</span>       <span class="desc">— MCP server setup, tool registration</span></div>
-      <div class="arch-block">  <span class="file">config.ts</span>       <span class="desc">— YAML config loader with validation</span></div>
-      <div class="arch-block">  <span class="file">types.ts</span>         <span class="desc">— Shared TypeScript types (BlockingChain)</span></div>
+      <div class="arch-block">  <span class="file">config.ts</span>       <span class="desc">— YAML config loader with URL parsing</span></div>
+      <div class="arch-block">  <span class="file">connector.ts</span>     <span class="desc">— DatabaseConnector interface (engine-agnostic)</span></div>
+      <div class="arch-block">  <span class="file">types.ts</span>         <span class="desc">— Shared TypeScript types</span></div>
       <div class="arch-block">  <span class="dir">connectors/</span></div>
-      <div class="arch-block">    <span class="file">mysql.ts</span>       <span class="desc">— Lazy pool + performance_schema query</span></div>
+      <div class="arch-block">    <span class="file">mysql.ts</span>       <span class="desc">— MySQLConnector (implements DatabaseConnector)</span></div>
       <div class="arch-block">  <span class="dir">tools/</span></div>
       <div class="arch-block">    <span class="file">blocking-chains.ts</span> <span class="desc">— MCP tool schema + handler</span></div>
 
       <h4>Design decisions</h4>
       <ul>
+        <li><strong>DatabaseConnector interface</strong> — standard commands (<code>databases</code>, <code>tables</code>, <code>describe</code>, <code>indexes</code>, <code>processes</code>, <code>query</code>) that work across engines. Add PostgreSQL or SQL Server by implementing the interface.</li>
+        <li><strong>Connection URLs</strong> — Connect directly via <code>mysql://user:***@host:port/db?ssl=true</code> without a config file.</li>
         <li><strong>Lazy imports</strong> — MCP SDK and mysql2 are loaded dynamically. CLI commands like <code>list-engines</code> start instantly without loading database drivers.</li>
         <li><strong>Lazy connection pools</strong> — MySQL connections are created on first use, not at startup.</li>
         <li><strong>One tool per file</strong> — Adding a new tool means adding a new file and registering it in <code>server.ts</code>.</li>
@@ -555,8 +737,13 @@ docker compose down -v <span class="cmd-comment"># Stop and delete data</span></
   </div>
 
   <script>
+    // Collapsible nav groups
+    document.querySelectorAll('nav .group-header').forEach(header => {
+      // groups start open if they have class "open"
+    });
+
     // Active nav highlight on scroll
-    const sections = document.querySelectorAll('main h2[id]');
+    const sections = document.querySelectorAll('main h2[id], main h3[id]');
     const navLinks = document.querySelectorAll('nav a[href^="#"]');
 
     function updateActiveNav() {
