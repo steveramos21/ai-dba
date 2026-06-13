@@ -3,7 +3,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import Table from "cli-table3";
-import { loadConfig, parseMysqlUrl } from "./config.js";
+import { loadConfig, parseMysqlUrl, resolveMysqlConfig } from "./config.js";
 // All heavy imports are dynamic — loaded only when the command runs.
 // This keeps the CLI fast and prevents the event loop from hanging
 // on MCP SDK / mysql2 listeners when running one-off commands.
@@ -202,6 +202,28 @@ program
           console.log(chalk.green(`Switched to ${currentEngine}`));
         },
       },
+      status: {
+        desc: "Show connection details for current engine",
+        fn: async () => {
+          const engine = config.engines[currentEngine];
+          if (!engine) {
+            console.log(chalk.red("No engine selected. Use: use <engineId>"));
+            return;
+          }
+          const resolved = resolveMysqlConfig(currentEngine, engine);
+          // Build a display-safe URL (mask the password)
+          const displayUrl = `mysql://${resolved.user}:***@${resolved.host}:${resolved.port}/${resolved.database}${resolved.ssl ? "?ssl=true" : ""}`;
+          console.log();
+          console.log(chalk.bold(`  Engine:      `) + chalk.cyan(currentEngine));
+          console.log(chalk.bold(`  Type:        `) + engine.type);
+          console.log(chalk.bold(`  Host:        `) + `${resolved.host}:${resolved.port}`);
+          console.log(chalk.bold(`  User:        `) + resolved.user);
+          console.log(chalk.bold(`  Database:    `) + resolved.database);
+          console.log(chalk.bold(`  SSL:         `) + (resolved.ssl ? "enabled" : "disabled"));
+          console.log(chalk.bold(`  Connection:  `) + chalk.dim(displayUrl));
+          console.log();
+        },
+      },
       "blocking-chains": {
         desc: "Show current blocking chains",
         fn: async () => {
@@ -255,6 +277,7 @@ program
     const aliases: Record<string, string> = {
       bc: "blocking-chains",
       ls: "engines",
+      s: "status",
       q: "quit",
       exit: "quit",
     };
