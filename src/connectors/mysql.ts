@@ -117,3 +117,48 @@ export async function getBlockingChainsMySQL(
     conn.release();
   }
 }
+
+/**
+ * Run a SQL query on a MySQL engine and return the results as an array of objects.
+ */
+export async function queryMySQL(
+  engineId: string,
+  config: EngineConfig,
+  sql: string
+): Promise<{ columns: string[]; rows: Record<string, unknown>[]; affectedRows?: number }> {
+  const pool = getPool(engineId, config);
+  const conn = await pool.getConnection();
+
+  try {
+    const [result] = await conn.execute(sql);
+
+    // SELECT / SHOW statements return RowDataPacket[]
+    if (Array.isArray(result)) {
+      const rows = result as RowDataPacket[];
+      if (rows.length === 0) {
+        return { columns: [], rows: [] };
+      }
+      const columns = Object.keys(rows[0]);
+      return {
+        columns,
+        rows: rows.map((row) => {
+          const obj: Record<string, unknown> = {};
+          for (const col of columns) {
+            obj[col] = (row as Record<string, unknown>)[col];
+          }
+          return obj;
+        }),
+      };
+    }
+
+    // INSERT/UPDATE/DELETE return OkPacket
+    const ok = result as { affectedRows?: number; insertId?: number; changedRows?: number };
+    return {
+      columns: ["affectedRows", "insertId", "changedRows"],
+      rows: [{ affectedRows: ok.affectedRows ?? 0, insertId: ok.insertId ?? 0, changedRows: ok.changedRows ?? 0 }],
+      affectedRows: ok.affectedRows,
+    };
+  } finally {
+    conn.release();
+  }
+}

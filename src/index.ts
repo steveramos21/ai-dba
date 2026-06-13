@@ -209,7 +209,7 @@ program
   .command("repl")
   .description("Interactive REPL for database diagnostics")
   .action(async () => {
-    const { getBlockingChainsMySQL, closeAllPools } = await import("./connectors/mysql.js");
+    const { getBlockingChainsMySQL, closeAllPools, queryMySQL } = await import("./connectors/mysql.js");
     const opts = program.opts();
 
     // Load config if it exists, otherwise start with empty engines
@@ -378,6 +378,58 @@ program
           }
         },
       },
+      sql: {
+        desc: "Run a SQL query (sql <statement>)",
+        fn: async (args) => {
+          const engine = config.engines[currentEngine];
+          if (!engine) {
+            console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+            return;
+          }
+          if (engine.type !== "mysql") {
+            console.log(chalk.red(`SQL not yet supported for ${engine.type}`));
+            return;
+          }
+          const sql = args.join(" ");
+          if (!sql) {
+            console.log(chalk.red("Usage: sql <statement>"));
+            console.log(chalk.dim("  sql SHOW DATABASES"));
+            console.log(chalk.dim("  sql SHOW TABLES"));
+            console.log(chalk.dim("  sql SELECT * FROM users LIMIT 10"));
+            return;
+          }
+          try {
+            const result = await queryMySQL(currentEngine, engine, sql);
+            if (result.rows.length === 0 && result.columns.length === 0) {
+              console.log(chalk.yellow("Empty set"));
+            } else if (result.affectedRows !== undefined) {
+              // DML statement
+              const table = new Table({ head: result.columns.map(chalk.white) });
+              for (const row of result.rows) {
+                table.push(result.columns.map((col) => String(row[col] ?? "-")));
+              }
+              console.log(table.toString());
+              console.log(chalk.green(`${result.affectedRows} row(s) affected`));
+            } else {
+              // SELECT/SHOW result set
+              const table = new Table({ head: result.columns.map(chalk.white) });
+              for (const row of result.rows) {
+                table.push(result.columns.map((col) => {
+                  const val = row[col];
+                  if (val === null) return chalk.dim("NULL");
+                  if (val instanceof Date) return val.toISOString();
+                  if (typeof val === "bigint") return val.toString();
+                  return String(val);
+                }));
+              }
+              console.log(table.toString());
+              console.log(chalk.dim(`${result.rows.length} row(s) in set`));
+            }
+          } catch (err) {
+            console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+          }
+        },
+      },
       quit: {
         desc: "Exit the REPL",
         fn: async () => {
@@ -397,6 +449,9 @@ program
       exit: "quit",
     };
 
+    // SQL keywords that should be auto-routed to the sql command
+    const sqlKeywords = ["select", "show", "describe", "desc", "explain", "insert", "update", "delete", "create", "alter", "drop", "truncate", "use", "with"];
+
     while (true) {
       const { default: inquirer } = await import("inquirer");
       const { input } = await inquirer.prompt([
@@ -415,11 +470,15 @@ program
       const cmd = parts[0].toLowerCase();
       const args = parts.slice(1);
 
-      const resolved = aliases[cmd] ?? cmd;
+      // Auto-route SQL keywords to the sql command
+      const resolved = aliases[cmd] ?? (sqlKeywords.includes(cmd) ? "sql" : cmd);
       const command = commands[resolved];
 
+      // For sql command via auto-route, pass the entire input as args
+      const commandArgs = resolved === "sql" && cmd !== "sql" ? [trimmed] : args;
+
       if (command) {
-        await command.fn(args);
+        await command.fn(commandArgs);
       } else {
         console.log(chalk.red(`Unknown command: ${cmd}. Type 'help' for available commands.`));
       }
