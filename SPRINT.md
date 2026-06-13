@@ -35,7 +35,7 @@
 
 ---
 
-## Sprint 2 — PostgreSQL Connector (CURRENT)
+## Sprint 2 — PostgreSQL Connector (IN PROGRESS)
 
 ### Locked Decisions
 
@@ -54,28 +54,28 @@
 
 ### Tasks (one PR each)
 
-1. **`feature/postgres-connector`** — PostgreSQL connector implementation
+1. **`feature/postgres-connector`** — PostgreSQL connector implementation ✅
    - `src/connectors/postgres.ts` implementing `DatabaseConnector`
    - `pg` driver dependency
    - Connection string pass-through to `pg.Pool`
    - `listDatabases`, `listTables`, `describeTable`, `listIndexes`, `listProcesses`, `query`, `closeAllPools`
-   - Blocking chains using `pg_locks` + `pg_stat_activity`
-   - URL scheme detection in `parseUrlToEngine` (postgresql://, postgres://)
+   - URL scheme detection (`postgresql://`, `postgres://`) with password masking
    - `--type` override flag on `connect` command
+   - Engine-aware `status` command (MySQL vs PostgreSQL display)
 
-2. **`feature/postgres-docker`** — Docker PostgreSQL test container
-   - Add PostgreSQL service to `docker-compose.yml` on port 15432
-   - Test database, user, password
-   - Update `config.yaml.example`
+2. **`feature/postgres-docker`** — Docker PostgreSQL test container ✅
+   - `docker-compose.yml` with MySQL 8.0 + PostgreSQL 16
+   - PostgreSQL on port 15432, MySQL on port 13306
+   - Updated `config.yaml.example` with both engines
 
-3. **`feature/postgres-tests`** — Vitest unit tests
-   - Mock `pg` driver
-   - Test connector mapping, URL detection, each method
-   - Integration test against Docker PostgreSQL
+3. **`feature/postgres-tests`** — Vitest unit tests ✅
+   - 13 tests, all passing
+   - Mock `pg` driver, test connector methods, URL masking, error handling
 
 4. **`bugfix/connect-auth`** — Fix `connect` URL auth bug (if time permits)
+   - Deferred — not blocking
 
-### Deferred to Sprint 3
+5. **`feature/mcp-dba-tools`** — Deferred to Sprint 3
 - MCP DBA tools (databases, tables, describe, indexes, processes)
 - Test suite + CI/CD (GitHub Actions)
 - Additional diagnostic categories (slow-queries, explain, replication-status, table-stats)
@@ -122,6 +122,7 @@ src/
   connector.ts      — DatabaseConnector interface (engine-agnostic)
   connectors/
     mysql.ts         — MySQL connector (DatabaseConnector impl)
+    postgres.ts       — PostgreSQL connector (DatabaseConnector impl)
   server.ts         — MCP server (blocking_chains tool only)
   types.ts          — BlockingChain type + shared types
 ```
@@ -144,8 +145,9 @@ interface DatabaseConnector {
 npm run build       — tsc compile
 npm run repl        — start REPL with config
 npm run connect     — connect via URL, drop into REPL
-npm run serve       — start MCP server
+npm run serve        — start MCP server
 npm run dev         — tsx watch dev mode
+npm test            — run Vitest tests
 ```
 
 ---

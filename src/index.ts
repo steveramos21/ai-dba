@@ -15,6 +15,15 @@ program
   .version("1.0.0")
   .option("-c, --config <path>", "Path to config.yaml", "config.yaml");
 
+// ─── Helper: get connector by engine type ─────────────────────
+function getConnectorForEngineById(engineId: string, config: EngineConfig, connectors: Record<string, DatabaseConnector>): DatabaseConnector {
+  const connector = connectors[config.type];
+  if (!connector) {
+    throw new Error(`Unsupported engine type: ${config.type}`);
+  }
+  return connector;
+}
+
 // ─── Helper: parse URL into engine config ─────────────────────
 function parseUrlToEngine(url: string): { id: string; config: EngineConfig; maskedUrl: string } | null {
   if (url.startsWith("mysql://") || url.startsWith("mysql2://")) {
@@ -25,8 +34,17 @@ function parseUrlToEngine(url: string): { id: string; config: EngineConfig; mask
     return { id, config, maskedUrl };
   } else if (url.startsWith("postgresql://") || url.startsWith("postgres://")) {
     const config: EngineConfig = { type: "postgres", url };
-    const id = `engine-${Date.now()}`;
-    return { id, config, maskedUrl: url };
+    // Simple mask for display — no custom parsing, pg handles the URL natively
+    const masked = url.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@");
+    // Extract host and db for a readable ID
+    try {
+      const u = new URL(url);
+      const id = `${u.hostname}-${u.pathname.slice(1) || "postgres"}`;
+      return { id, config, maskedUrl: masked };
+    } catch {
+      const id = `postgres-${Date.now()}`;
+      return { id, config, maskedUrl: masked };
+    }
   }
   return null;
 }
@@ -165,10 +183,13 @@ program
 
     const { id: engineId, config: engineConfig, maskedUrl } = result;
     const { mysqlConnector } = await import("./connectors/mysql.js");
+    const { postgresConnector } = await import("./connectors/postgres.js");
+    const connectors: Record<string, DatabaseConnector> = { mysql: mysqlConnector, postgres: postgresConnector };
 
     // Verify connection
+    const connector = getConnectorForEngineById(engineId, engineConfig, connectors);
     try {
-      await mysqlConnector.query(engineId, engineConfig, "SELECT 1");
+      await connector.query(engineId, engineConfig, "SELECT 1");
       console.log(chalk.green(`Connected to ${chalk.bold(engineId)}`));
       console.log(chalk.dim(`  ${maskedUrl}`));
     } catch (err) {
@@ -177,7 +198,6 @@ program
     }
 
     // Drop into REPL with this engine
-    const connectors: Record<string, DatabaseConnector> = { mysql: mysqlConnector };
     const config = { engines: { [engineId]: engineConfig } as Record<string, EngineConfig> };
 
     function getConnectorForEngine(eid: string): DatabaseConnector | null {
@@ -476,16 +496,24 @@ async function startRepl(
           console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
           return;
         }
-        const resolved = resolveMysqlConfig(currentEngine, engine);
-        const displayUrl = `mysql://${resolved.user}:***@${resolved.host}:${resolved.port}/${resolved.database}${resolved.ssl ? "?ssl=true" : ""}`;
         console.log();
         console.log(chalk.bold(`  Engine:      `) + chalk.cyan(currentEngine));
         console.log(chalk.bold(`  Type:        `) + engine.type);
-        console.log(chalk.bold(`  Host:        `) + `${resolved.host}:${resolved.port}`);
-        console.log(chalk.bold(`  User:        `) + resolved.user);
-        console.log(chalk.bold(`  Database:    `) + resolved.database);
-        console.log(chalk.bold(`  SSL:         `) + (resolved.ssl ? "enabled" : "disabled"));
-        console.log(chalk.bold(`  Connection:  `) + chalk.dim(displayUrl));
+        if (engine.type === "mysql") {
+          const resolved = resolveMysqlConfig(currentEngine, engine);
+          const displayUrl = `mysql://${resolved.user}:***@${resolved.host}:${resolved.port}/${resolved.database}${resolved.ssl ? "?ssl=true" : ""}`;
+          console.log(chalk.bold(`  Host:        `) + `${resolved.host}:${resolved.port}`);
+          console.log(chalk.bold(`  User:        `) + resolved.user);
+          console.log(chalk.bold(`  Database:    `) + resolved.database);
+          console.log(chalk.bold(`  SSL:         `) + (resolved.ssl ? "enabled" : "disabled"));
+          console.log(chalk.bold(`  Connection:  `) + chalk.dim(displayUrl));
+        } else if (engine.type === "postgres" && engine.url) {
+          const maskedUrl = engine.url.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@");
+          console.log(chalk.bold(`  Connection:  `) + chalk.dim(maskedUrl));
+        } else {
+          console.log(chalk.bold(`  Host:        `) + (engine.host ?? "-"));
+          console.log(chalk.bold(`  Database:    `) + (engine.database ?? "-"));
+        }
         console.log();
       },
     },
@@ -623,6 +651,7 @@ program
   .description("Interactive REPL for database diagnostics")
   .action(async () => {
     const { mysqlConnector } = await import("./connectors/mysql.js");
+    const { postgresConnector } = await import("./connectors/postgres.js");
     const opts = program.opts();
 
     // Load config if it exists, otherwise start with empty engines
@@ -635,6 +664,7 @@ program
 
     const connectors: Record<string, DatabaseConnector> = {
       mysql: mysqlConnector,
+      postgres: postgresConnector,
     };
 
     const engineIds = () => Object.keys(config.engines);
