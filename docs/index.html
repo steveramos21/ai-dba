@@ -192,6 +192,7 @@
     .badge-mcp { background: #7c3aed33; color: #a78bfa; }
     .badge-cli { background: #14b8a633; color: #14b8a6; }
     .badge-mysql { background: #3b82f633; color: #60a5fa; }
+    .badge-pg { background: #14b8a633; color: #2dd4bf; }
     .badge-postgres { background: #3b82f633; color: #60a5fa; }
     .badge-agnostic { background: #22c55e33; color: #4ade80; }
     .callout {
@@ -438,8 +439,8 @@ npm run connect -- 'postgresql:***@host:5432/db' --type postgres</code></pre>
       <pre><code>npm run list-engines</code></pre>
 
       <h2 id="blocking-chains">blocking-chains</h2>
-      <span class="badge badge-cli">CLI</span> <span class="badge badge-mcp">MCP</span> <span class="badge badge-mysql">MySQL</span>
-      <p>Detect row-level blocking chains using MySQL <code>performance_schema.data_lock_waits</code>.</p>
+      <span class="badge badge-cli">CLI</span> <span class="badge badge-mcp">MCP</span> <span class="badge badge-mysql">MySQL</span> <span class="badge badge-pg">PostgreSQL</span>
+      <p>Detect blocking chains across MySQL and PostgreSQL. MySQL uses <code>INNODB_LOCK_WAITS</code> + <code>INNODB_TRX</code>; PostgreSQL uses <code>pg_blocking_pids()</code> + <code>pg_stat_activity</code>.</p>
       <pre><code><span class="cmd-comment"># Table output</span>
 npm run blocking-chains -- mysql-primary
 
@@ -448,7 +449,7 @@ npm run blocking-chains -- mysql-primary -- --json</code></pre>
 
       <div class="callout callout-info">
         <div class="callout-title">Requirements</div>
-        <p>MySQL 8.0+ with <code>performance_schema</code> enabled (default). If disabled, the tool returns an error telling you to enable it.</p>
+      <p>MySQL 8.0+ with <code>performance_schema</code> enabled (default). PostgreSQL 12+ (no special configuration needed — <code>pg_stat_activity</code> is available by default).</p>
       </div>
 
       <h2 id="repl">repl</h2>
@@ -581,7 +582,7 @@ ai-dba[mysql-test]> SELECT * FROM users LIMIT 10</code></pre>
         <tbody>
           <tr><td><code>engines</code></td><td><code>ls</code></td><td>List configured engines (current marked with *)</td></tr>
           <tr><td><code>use &lt;engineId&gt;</code></td><td></td><td>Switch to a different engine</td></tr>
-          <tr><td><code>blocking-chains</code></td><td><code>bc</code></td><td>Show blocking chains on current engine (MySQL)</td></tr>
+          <tr><td><code>blocking-chains</code></td><td><code>bc</code></td><td>Show blocking chains on current engine</td></tr>
           <tr><td><code>status</code></td><td><code>s</code></td><td>Show connection details for current engine</td></tr>
           <tr><td><code>help</code></td><td></td><td>Show available commands</td></tr>
           <tr><td><code>quit</code></td><td><code>q</code>, <code>exit</code></td><td>Exit the REPL</td></tr>
@@ -626,7 +627,7 @@ ai-dba[mysql-test]> SELECT * FROM users LIMIT 10</code></pre>
       <p>The MCP server exposes one tool:</p>
 
       <h4>blocking-chains</h4>
-      <p>Detect current row-level blocking chains on a MySQL database.</p>
+      <p>Detect current blocking chains on a MySQL or PostgreSQL database.</p>
       <table>
         <thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead>
         <tbody>
@@ -699,13 +700,14 @@ docker compose down -v <span class="cmd-comment"># Stop and delete data</span></
       <div class="arch-block">  <span class="file">index.ts</span>        <span class="desc">— CLI entry point (commander, REPL)</span></div>
       <div class="arch-block">  <span class="file">server.ts</span>       <span class="desc">— MCP server setup, tool registration</span></div>
       <div class="arch-block">  <span class="file">config.ts</span>       <span class="desc">— YAML config loader with URL parsing</span></div>
-      <div class="arch-block">  <span class="file">connector.ts</span>     <span class="desc">— DatabaseConnector interface (engine-agnostic)</span></div>
-      <div class="arch-block">  <span class="file">types.ts</span>         <span class="desc">— Shared TypeScript types</span></div>
+      <div class="arch-block">    <span class="file">connector.ts</span> <span class="desc">— DatabaseConnector interface + BlockingChain type (engine-agnostic)</span></div>
+      <div class="arch-block">  <span class="file">types.ts</span>         <span class="desc">— DELETED (consolidated into connector.ts)</span></div>
       <div class="arch-block">  <span class="dir">connectors/</span></div>
       <div class="arch-block">    <span class="file">mysql.ts</span> <span class="desc">— MySQLConnector (implements DatabaseConnector)</span></div>
       <div class="arch-block">    <span class="file">postgres.ts</span> <span class="desc">— PostgreSQLConnector (implements DatabaseConnector)</span></div>
       <div class="arch-block">  <span class="dir">tools/</span></div>
-      <div class="arch-block">    <span class="file">blocking-chains.ts</span> <span class="desc">— MCP tool schema + handler</span></div>
+      <div class="arch-block">    <span class="file">blocking-chains.ts</span> <span class="desc">— MCP tool schema + handler (connector map dispatch)</span></div>
+    </div>
 
       <h4>Design decisions</h4>
       <ul>
@@ -742,7 +744,7 @@ docker compose down -v <span class="cmd-comment"># Stop and delete data</span></
         <thead><tr><th>Scenario</th><th>Response</th></tr></thead>
         <tbody>
           <tr><td>Unknown engine ID</td><td><code>Unknown engine "x". Available: mysql-primary</code></td></tr>
-          <tr><td>Unsupported engine type</td><td><code>Engine "x" is type "postgres". Only MySQL blocking chains are currently supported.</code></td></tr>
+          <tr><td>Unsupported engine type</td><td>Connector's <code>getBlockingChains()</code> method throws</td></tr>
           <tr><td>Config file not found</td><td><code>Config file not found: /path/to/config.yaml</code></td></tr>
           <tr><td>performance_schema disabled</td><td><code>performance_schema is disabled on engine "x". Enable it with: SET GLOBAL performance_schema = ON;</code></td></tr>
           <tr><td>Connection refused</td><td><code>Connection error on engine "x": ECONNREFUSED 127.0.0.1:3306</code></td></tr>

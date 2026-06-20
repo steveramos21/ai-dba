@@ -96,27 +96,32 @@ ai-dba blocking-chains <engineId>       # Table output
 ai-dba blocking-chains <engineId> --json # JSON output
 ```
 
-Detects row-level blocking chains using MySQL `performance_schema.data_lock_waits`. Returns:
+Detects blocking chains across MySQL and PostgreSQL. Returns a list of blocking chain entries:
 
 | Field | Description |
 |-------|-------------|
+| `engine_id` | Engine identifier from config |
 | `blocking_pid` | Process ID holding the lock |
 | `blocked_pid` | Process ID waiting for the lock |
 | `wait_duration_ms` | How long the blocked session has been waiting |
-| `wait_event` | Type of wait event |
+| `wait_event` | Wait event name (engine-specific) |
 | `blocking_query` | SQL statement holding the lock |
 | `blocked_query` | SQL statement waiting for the lock |
 | `database_name` | Database context |
-| `wait_type` | Lock type (e.g. "Sleep holding lock") |
-| `status` | Thread status |
-| `host_name` | Client hostname |
+| `wait_type` | Wait type classification |
+| `status` | Session status |
+| `host_name` | Client host address |
 | `program_name` | Client program name |
+| `login_time` | Session login timestamp |
+
+**MySQL** uses `INNODB_LOCK_WAITS` + `INNODB_TRX` + `performance_schema.threads` (4-join query). `wait_type` and `program_name` are NULL for MySQL (not exposed in the query).
+
+**PostgreSQL** uses `pg_blocking_pids()` + `pg_stat_activity` with `query_start` for wait duration. All 12 fields are populated natively.
 
 **Error cases:**
 
 - Unknown engine ID → `Unknown engine "x". Available: mysql-primary`
-- Unsupported engine type → `Engine "x" is type "postgres". Only MySQL blocking chains are currently supported.`
-- `performance_schema` disabled → error message telling user to enable it
+- Unsupported engine type → error from the connector's `getBlockingChains()` method
 
 ### `repl`
 
@@ -246,10 +251,21 @@ The example config points to both Docker MySQL on port 13306 and PostgreSQL on p
 
 ### Test blocking detection
 
-An automated test script creates a real blocking scenario and verifies detection:
+MySQL blocking scenario:
 
 ```bash
 node test/test-blocking.mjs
+```
+
+PostgreSQL blocking scenario:
+
+```bash
+# Seed test data first
+docker exec ai-dba-postgres-test psql -U postgres -d testdb \
+  -c "CREATE TABLE IF NOT EXISTS blocking_test (id SERIAL PRIMARY KEY, value INT); INSERT INTO blocking_test (value) VALUES (1) ON CONFLICT DO NOTHING;"
+
+# Run the test
+node test/test-blocking-postgres.mjs
 ```
 
 ### Stop databases
@@ -325,13 +341,12 @@ engines:
 ```
 src/
   index.ts              CLI entry point (commander, REPL)
-  server.ts             MCP server setup
+  server.ts             MCP server setup + connector map
   config.ts             YAML config loader with URL parsing
-  connector.ts          DatabaseConnector interface (engine-agnostic)
-  types.ts              Shared TypeScript types
+  connector.ts          DatabaseConnector interface + BlockingChain type (engine-agnostic)
   connectors/
     mysql.ts            MySQLConnector (implements DatabaseConnector)
-    postgres.ts          PostgreSQLConnector (implements DatabaseConnector)
+    postgres.ts         PostgreSQLConnector (implements DatabaseConnector)
   tools/
     blocking-chains.ts  MCP tool definition + handler
 ```

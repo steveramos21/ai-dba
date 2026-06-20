@@ -35,50 +35,42 @@
 
 ---
 
-## Sprint 2 — PostgreSQL Connector (IN PROGRESS)
+## Sprint 2 — PostgreSQL Connector + Blocking Chains (COMPLETE)
 
-### Locked Decisions
+**Status**: DONE. Merged via PRs #5, #7, #8, #9.
 
-| Decision | Choice |
-|---|---|
-| Focus | PostgreSQL connector only |
-| Driver | `pg` (node-postgres) |
-| URL handling | Pass connection strings directly to `pg.Pool({ connectionString })` |
-| Config | URL only — no custom `resolvePostgresConfig` parsing |
-| Password masking | Simple regex on display output (`url.replace(/:.*@/, ':***@')`) |
-| Multi-engine | Auto-detect from URL scheme, `--type` override available |
-| Docker | Add PostgreSQL to existing docker-compose on port 15432 |
-| SSL | Pass-through — `pg` handles all SSL params natively |
-| Testing | Vitest, mock the `pg` driver |
-| Sprint scope | PostgreSQL connector only (no MCP tools) |
+### What was built:
+- PostgreSQL connector implementing full `DatabaseConnector` interface
+- `pg` driver with connection string pass-through to `pg.Pool`
+- Docker PostgreSQL 16 on port 15432 alongside MySQL
+- `getBlockingChains()` added to `DatabaseConnector` interface as a class method
+- `BlockingChain` type consolidated into `connector.ts` (12 nullable fields, replaces `BlockingChainInfo`)
+- `types.ts` deleted — all shared types in `connector.ts`
+- MySQL blocking chains query fixed (3 bugs: wrong PIDs, wrong database_name, wrong wait_event)
+- PostgreSQL blocking chains implementation (`pg_blocking_pids()` + `pg_stat_activity`, `query_start` for duration)
+- Engine-agnostic dispatch via connector map — MCP tool, CLI, REPL all use `connectors[engine.type]`
+- Centralized `shutdown(connectors)` iterates all connectors for pool cleanup
+- Unit tests for both MySQL and PostgreSQL `getBlockingChains()` with mocked rows
+- PostgreSQL integration test (`LOCK TABLE ... IN ACCESS EXCLUSIVE MODE` scenario)
+- All stale branches deleted, `AGENTS.md` committed, `.claude/` gitignored
 
-### Tasks (one PR each)
+### PRs:
+- PR #5 — PostgreSQL connector (Sprint 2 base)
+- PR #7 — Interface refactor: `getBlockingChains()` on interface, types consolidation, connector map dispatch
+- PR #8 — Fix MySQL blocking chains query (4-join: INNODB_LOCK_WAITS + INNODB_TRX x2 + threads x2)
+- PR #9 — PostgreSQL blocking chains implementation + integration test + docs
 
-1. **`feature/postgres-connector`** — PostgreSQL connector implementation ✅
-   - `src/connectors/postgres.ts` implementing `DatabaseConnector`
-   - `pg` driver dependency
-   - Connection string pass-through to `pg.Pool`
-   - `listDatabases`, `listTables`, `describeTable`, `listIndexes`, `listProcesses`, `query`, `closeAllPools`
-   - URL scheme detection (`postgresql://`, `postgres://`) with password masking
-   - `--type` override flag on `connect` command
-   - Engine-aware `status` command (MySQL vs PostgreSQL display)
+### Sprint 2 Retro:
+- PostgreSQL connector — working, tested against Docker PostgreSQL 16
+- Blocking chains — now engine-agnostic, both MySQL and PostgreSQL supported
+- Connector map pattern — clean dispatch, no hardcoded engine guards
+- Integration test catches real blocking scenarios — verified correct PID separation and field mapping
+- PR sequence worked well: interface refactor first (PR 1), then query fix (PR 2), then impl + docs (PR 3)
 
-2. **`feature/postgres-docker`** — Docker PostgreSQL test container ✅
-   - `docker-compose.yml` with MySQL 8.0 + PostgreSQL 16
-   - PostgreSQL on port 15432, MySQL on port 13306
-   - Updated `config.yaml.example` with both engines
-
-3. **`feature/postgres-tests`** — Vitest unit tests ✅
-   - 13 tests, all passing
-   - Mock `pg` driver, test connector methods, URL masking, error handling
-
-4. **`bugfix/connect-auth`** — Fix `connect` URL auth bug (if time permits)
-   - Deferred — not blocking
-
-5. **`feature/mcp-dba-tools`** — Deferred to Sprint 3
-- MCP DBA tools (databases, tables, describe, indexes, processes)
-- Test suite + CI/CD (GitHub Actions)
-- Additional diagnostic categories (slow-queries, explain, replication-status, table-stats)
+### Lessons Learned:
+- **MySQL field mapping bug was invisible without value-asserting tests**: The original MySQL query had `blocking_pid` and `blocked_pid` both from the same column, but the integration test only checked `chains.length > 0` — it passed because a chain was "detected" even though the PIDs were identical. The unit test added in PR 2 asserts specific field values, which would have caught the bug immediately. Lesson: presence-based tests are insufficient for field mapping correctness — assert actual values.
+- **Standalone-to-interface refactor pattern**: Moving a standalone function (`getBlockingChainsMySQL`) into a class method on an interface required touching 3 entry points (MCP tool, CLI, REPL) simultaneously. The stub-first approach (PR 1 moves the broken query unchanged, PR 2 fixes it) kept the refactor PR clean and the fix PR small — good separation of concerns.
+- **`pg_blocking_pids()` returns `integer[]`**: The initial query used `JOIN LATERAL pg_blocking_pids(blocked.pid) AS block_pid ON true` which failed with `operator does not exist: integer = integer[]`. Fixed by wrapping in `unnest()` — `JOIN LATERAL unnest(pg_blocking_pids(blocked.pid)) AS block_pid ON true`. The integration test caught this before the unit test could, because the mock didn't exercise the actual SQL type system.
 
 ---
 
@@ -119,12 +111,13 @@
 src/
   index.ts          — CLI entry (Commander + REPL)
   config.ts         — YAML config + URL parsing + resolveMysqlConfig
-  connector.ts      — DatabaseConnector interface (engine-agnostic)
+  connector.ts      — DatabaseConnector interface + BlockingChain type (engine-agnostic)
   connectors/
     mysql.ts         — MySQL connector (DatabaseConnector impl)
     postgres.ts       — PostgreSQL connector (DatabaseConnector impl)
-  server.ts         — MCP server (blocking_chains tool only)
-  types.ts          — BlockingChain type + shared types
+  server.ts         — MCP server + connector map + shutdown
+  tools/
+    blocking-chains.ts — MCP tool (connector map dispatch)
 ```
 
 ### DatabaseConnector Interface
@@ -136,6 +129,7 @@ interface DatabaseConnector {
   listIndexes(engineId: string, config: EngineConfig, table: string): Promise<IndexInfo[]>
   listProcesses(engineId: string, config: EngineConfig): Promise<ProcessInfo[]>
   query(engineId: string, config: EngineConfig, sql: string): Promise<QueryResult>
+  getBlockingChains(engineId: string, config: EngineConfig): Promise<BlockingChain[]>
   closeAllPools(): Promise<void>
 }
 ```
