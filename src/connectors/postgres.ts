@@ -197,8 +197,47 @@ export class PostgreSQLConnector implements DatabaseConnector {
     }
   }
 
-  async getBlockingChains(_engineId: string, _config: EngineConfig): Promise<BlockingChain[]> {
-    throw new Error("getBlockingChains() not yet implemented for PostgreSQL");
+  async getBlockingChains(engineId: string, config: EngineConfig): Promise<BlockingChain[]> {
+    const pool = this.getPool(engineId, config);
+    const client = await pool.connect();
+    try {
+      const res = await client.query(
+        `SELECT
+          blocking.pid        AS blocking_pid,
+          blocked.pid         AS blocked_pid,
+          EXTRACT(EPOCH FROM (now() - blocked.query_start)) * 1000  AS wait_duration_ms,
+          blocked.wait_event  AS wait_event,
+          blocking.query      AS blocking_query,
+          blocked.query       AS blocked_query,
+          blocked.datname     AS database_name,
+          blocked.wait_event_type AS wait_type,
+          blocked.state       AS status,
+          blocked.client_addr AS host_name,
+          blocked.application_name AS program_name,
+          blocked.backend_start    AS login_time
+        FROM pg_stat_activity blocked
+        JOIN LATERAL unnest(pg_blocking_pids(blocked.pid)) AS block_pid ON true
+        JOIN pg_stat_activity blocking ON blocking.pid = block_pid
+        WHERE blocked.wait_event IS NOT NULL`
+      );
+      return res.rows.map((row: any) => ({
+        engine_id: engineId,
+        blocking_pid: row.blocking_pid,
+        blocked_pid: row.blocked_pid,
+        wait_duration_ms: row.wait_duration_ms != null ? Math.round(Number(row.wait_duration_ms)) : null,
+        wait_event: row.wait_event ?? null,
+        blocking_query: row.blocking_query ?? null,
+        blocked_query: row.blocked_query ?? null,
+        database_name: row.database_name ?? null,
+        wait_type: row.wait_type ?? null,
+        status: row.status ?? null,
+        host_name: row.host_name ? String(row.host_name) : null,
+        program_name: row.program_name ?? null,
+        login_time: row.login_time ? String(row.login_time) : null,
+      }));
+    } finally {
+      client.release();
+    }
   }
 
   async closeAllPools(): Promise<void> {

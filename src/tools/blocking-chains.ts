@@ -14,8 +14,9 @@ export function registerBlockingChainsTool(
 ): void {
   server.tool(
     "blocking-chains",
-    "Get current blocking chain details from a database engine. " +
-    "Returns blocked sessions, blockers, wait duration, and the queries involved.",
+    "Get current blocking chain details from a database engine (MySQL or PostgreSQL). " +
+    "Returns blocked sessions, blockers, wait duration, and the queries involved. " +
+    "MySQL uses INNODB_LOCK_WAITS + INNODB_TRX; PostgreSQL uses pg_blocking_pids() + pg_stat_activity.",
     {
       engineId: z.string().describe(
         "Engine identifier from config.yaml (e.g., 'mysql-primary')"
