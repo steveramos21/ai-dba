@@ -192,30 +192,38 @@ export class MySQLConnector implements DatabaseConnector {
     try {
       const [rows] = await connection.query<RowDataPacket[]>(
         `SELECT
-          r.trx_mysql_thread_id as blocking_pid,
-          r.trx_mysql_thread_id as blocked_pid,
-          r.trx_state as wait_event,
-          r.trx_tables_locked as database_name,
-          r.trx_query as blocking_query,
-          r.trx_query as blocked_query
-        FROM INFORMATION_SCHEMA.INNODB_LOCK_WAITS w
-        JOIN INFORMATION_SCHEMA.INNODB_TRX b ON b.trx_id = w.blocking_trx_id
-        JOIN INFORMATION_SCHEMA.INNODB_TRX r ON r.trx_id = w.requesting_trx_id`
+          blocking_thd.trx_mysql_thread_id  AS blocking_pid,
+          blocked_thd.trx_mysql_thread_id   AS blocked_pid,
+          TIMESTAMPDIFF(MICROSECOND, blocked_thd.trx_wait_started, NOW()) DIV 1000 AS wait_duration_ms,
+          blocked_thd.trx_state             AS wait_event,
+          blocking_thd.trx_query            AS blocking_query,
+          blocked_thd.trx_query             AS blocked_query,
+          blocked_ps.PROCESSLIST_DB         AS database_name,
+          NULL                              AS wait_type,
+          blocked_ps.PROCESSLIST_STATE      AS status,
+          blocked_ps.PROCESSLIST_HOST       AS host_name,
+          NULL                              AS program_name,
+          blocked_ps.CREATE_TIME            AS login_time
+        FROM information_schema.INNODB_LOCK_WAITS w
+        JOIN information_schema.INNODB_TRX blocking_thd ON blocking_thd.trx_id = w.blocking_trx_id
+        JOIN information_schema.INNODB_TRX blocked_thd  ON blocked_thd.trx_id  = w.requesting_trx_id
+        LEFT JOIN performance_schema.threads blocked_ps   ON blocked_ps.THREAD_ID   = blocked_thd.trx_mysql_thread_id
+        LEFT JOIN performance_schema.threads blocking_ps  ON blocking_ps.THREAD_ID  = blocking_thd.trx_mysql_thread_id`
       );
       return rows.map((row: any) => ({
         engine_id: engineId,
         blocking_pid: row.blocking_pid,
         blocked_pid: row.blocked_pid,
-        wait_duration_ms: null,
+        wait_duration_ms: row.wait_duration_ms ?? null,
         wait_event: row.wait_event ?? null,
         blocking_query: row.blocking_query ?? null,
         blocked_query: row.blocked_query ?? null,
         database_name: row.database_name ?? null,
-        wait_type: null,
-        status: null,
-        host_name: null,
-        program_name: null,
-        login_time: null,
+        wait_type: row.wait_type ?? null,
+        status: row.status ?? null,
+        host_name: row.host_name ?? null,
+        program_name: row.program_name ?? null,
+        login_time: row.login_time ? String(row.login_time) : null,
       }));
     } finally {
       connection.release();
