@@ -8,6 +8,7 @@ import type {
   IndexInfo,
   ProcessInfo,
   QueryResult,
+  BlockingChain,
 } from "../connector.js";
 
 export class PostgreSQLConnector implements DatabaseConnector {
@@ -194,6 +195,10 @@ export class PostgreSQLConnector implements DatabaseConnector {
     } finally {
       client.release();
     }
+  }
+
+  async getBlockingChains(_engineId: string, _config: EngineConfig): Promise<BlockingChain[]> {
+    throw new Error("getBlockingChains() not yet implemented for PostgreSQL");
   }
 
   async closeAllPools(): Promise<void> {
