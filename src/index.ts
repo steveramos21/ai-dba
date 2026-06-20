@@ -112,7 +112,7 @@ program
   .description("Show current blocking chains for an engine")
   .option("--json", "Output raw JSON instead of a table")
   .action(async (engineId: string, cmdOpts: { json?: boolean }) => {
-    const { getBlockingChainsMySQL, closeAllPools } = await import("./connectors/mysql.js");
+    const { buildConnectorMap, shutdown } = await import("./server.js");
     const opts = program.opts();
     const config = loadConfig(opts.config);
     const engine = config.engines[engineId];
@@ -122,40 +122,42 @@ program
       process.exit(1);
     }
 
-    if (engine.type !== "mysql") {
-      console.error(chalk.red(`Engine "${engineId}" is type "${engine.type}". Only MySQL is currently supported for blocking-chains.`));
+    const connectors = buildConnectorMap();
+    const connector = connectors[engine.type];
+    if (!connector) {
+      console.error(chalk.red(`Engine "${engineId}" is type "${engine.type}". No connector registered for this engine type.`));
       process.exit(1);
     }
 
     try {
-      const chains = await getBlockingChainsMySQL(engineId, engine);
+      const chains = await connector.getBlockingChains(engineId, engine);
 
       if (cmdOpts.json) {
-        console.log(JSON.stringify(chains, null, 2));
+        console.log(JSON.stringify({ chains, count: chains.length }, null, 2));
       } else if (chains.length === 0) {
         console.log(chalk.green("No blocking chains found on") + chalk.cyan(` ${engineId}`));
       } else {
         const table = new Table({
           head: [
-            chalk.white("Blocking PID"),
             chalk.white("Blocked PID"),
-            chalk.white("Wait"),
+            chalk.white("Blocking PID"),
+            chalk.white("Wait (ms)"),
             chalk.white("Database"),
-            chalk.white("Blocking Query"),
             chalk.white("Blocked Query"),
+            chalk.white("Status"),
           ],
-          colWidths: [14, 14, 12, 14, 40, 40],
+          colWidths: [14, 14, 14, 16, 40, 16],
           wordWrap: true,
         });
 
         for (const c of chains) {
           table.push([
-            c.blocking_pid,
             c.blocked_pid,
-            c.wait_event,
+            c.blocking_pid,
+            c.wait_duration_ms ?? "-",
             c.database_name ?? "-",
-            (c.blocking_query ?? "-").substring(0, 80),
             (c.blocked_query ?? "-").substring(0, 80),
+            c.status ?? "-",
           ]);
         }
         console.log(table.toString());
@@ -165,7 +167,7 @@ program
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
       process.exit(1);
     } finally {
-      await closeAllPools();
+      await shutdown(connectors);
       process.exit(0);
     }
   });
@@ -525,28 +527,28 @@ async function startRepl(
           console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
           return;
         }
-        if (engine.type !== "mysql") {
-          console.log(chalk.red(`blocking-chains not yet supported for ${engine.type}`));
+        const connector = getConnectorForEngine(currentEngine);
+        if (!connector) {
+          console.log(chalk.red(`No connector registered for engine type "${engine.type}"`));
           return;
         }
         try {
-          const { getBlockingChainsMySQL } = await import("./connectors/mysql.js");
-          const chains = await getBlockingChainsMySQL(currentEngine, engine);
+          const chains = await connector.getBlockingChains(currentEngine, engine);
           if (chains.length === 0) {
             console.log(chalk.green("No blocking chains."));
           } else {
             const table = new Table({
-              head: ["Blocking PID", "Blocked PID", "Wait", "Database", "Blocking Query", "Blocked Query"],
+              head: ["Blocked PID", "Blocking PID", "Wait (ms)", "Database", "Blocked Query", "Status"],
               wordWrap: true,
             });
             for (const c of chains) {
               table.push([
-                c.blocking_pid,
                 c.blocked_pid,
-                c.wait_event,
+                c.blocking_pid,
+                c.wait_duration_ms ?? "-",
                 c.database_name ?? "-",
-                (c.blocking_query ?? "-").substring(0, 60),
                 (c.blocked_query ?? "-").substring(0, 60),
+                c.status ?? "-",
               ]);
             }
             console.log(table.toString());

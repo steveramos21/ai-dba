@@ -1,6 +1,19 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AiDbaConfig } from "./config.js";
-import { registerBlockingChainsTool, closeAllPools } from "./tools/blocking-chains.js";
+import type { DatabaseConnector } from "./connector.js";
+import { mysqlConnector } from "./connectors/mysql.js";
+import { postgresConnector } from "./connectors/postgres.js";
+import { registerBlockingChainsTool } from "./tools/blocking-chains.js";
+
+/**
+ * Build the connector map for all supported engine types.
+ */
+export function buildConnectorMap(): Record<string, DatabaseConnector> {
+  return {
+    mysql: mysqlConnector,
+    postgres: postgresConnector,
+  };
+}
 
 /**
  * Create and configure the AI-DBA diagnostics MCP server.
@@ -11,15 +24,21 @@ export function createServer(config: AiDbaConfig): McpServer {
     version: "1.0.0",
   });
 
+  const connectors = buildConnectorMap();
+
   // Register tools
-  registerBlockingChainsTool(server, config);
+  registerBlockingChainsTool(server, config, connectors);
 
   return server;
 }
 
 /**
- * Graceful shutdown: close all database pools.
+ * Graceful shutdown: close all database pools across all connectors.
+ * @param connectors Connector map (defaults to all registered connectors)
  */
-export async function shutdown(): Promise<void> {
-  await closeAllPools();
+export async function shutdown(connectors?: Record<string, DatabaseConnector>): Promise<void> {
+  const map = connectors ?? buildConnectorMap();
+  for (const connector of Object.values(map)) {
+    await connector.closeAllPools();
+  }
 }

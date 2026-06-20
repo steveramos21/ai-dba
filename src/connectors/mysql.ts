@@ -8,6 +8,7 @@ import type {
   IndexInfo,
   ProcessInfo,
   QueryResult,
+  BlockingChain,
 } from "../connector.js";
 
 export class MySQLConnector implements DatabaseConnector {
@@ -185,6 +186,42 @@ export class MySQLConnector implements DatabaseConnector {
     }
   }
 
+  async getBlockingChains(engineId: string, config: EngineConfig): Promise<BlockingChain[]> {
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT
+          r.trx_mysql_thread_id as blocking_pid,
+          r.trx_mysql_thread_id as blocked_pid,
+          r.trx_state as wait_event,
+          r.trx_tables_locked as database_name,
+          r.trx_query as blocking_query,
+          r.trx_query as blocked_query
+        FROM INFORMATION_SCHEMA.INNODB_LOCK_WAITS w
+        JOIN INFORMATION_SCHEMA.INNODB_TRX b ON b.trx_id = w.blocking_trx_id
+        JOIN INFORMATION_SCHEMA.INNODB_TRX r ON r.trx_id = w.requesting_trx_id`
+      );
+      return rows.map((row: any) => ({
+        engine_id: engineId,
+        blocking_pid: row.blocking_pid,
+        blocked_pid: row.blocked_pid,
+        wait_duration_ms: null,
+        wait_event: row.wait_event ?? null,
+        blocking_query: row.blocking_query ?? null,
+        blocked_query: row.blocked_query ?? null,
+        database_name: row.database_name ?? null,
+        wait_type: null,
+        status: null,
+        host_name: null,
+        program_name: null,
+        login_time: null,
+      }));
+    } finally {
+      connection.release();
+    }
+  }
+
   async closeAllPools(): Promise<void> {
     for (const pool of this.pools.values()) {
       await pool.end();
@@ -194,36 +231,3 @@ export class MySQLConnector implements DatabaseConnector {
 }
 
 export const mysqlConnector = new MySQLConnector();
-
-export async function getBlockingChainsMySQL(engineId: string, config: EngineConfig) {
-  const pool = mysqlConnector.getPool(engineId, config);
-  const connection = await pool.getConnection();
-  try {
-    const [rows] = await connection.query<RowDataPacket[]>(
-      `SELECT
-        r.trx_mysql_thread_id as blocking_pid,
-        r.trx_mysql_thread_id as blocked_pid,
-        r.trx_state as wait_event,
-        r.trx_tables_locked as database_name,
-        r.trx_query as blocking_query,
-        r.trx_query as blocked_query
-      FROM INFORMATION_SCHEMA.INNODB_LOCK_WAITS w
-      JOIN INFORMATION_SCHEMA.INNODB_TRX b ON b.trx_id = w.blocking_trx_id
-      JOIN INFORMATION_SCHEMA.INNODB_TRX r ON r.trx_id = w.requesting_trx_id`
-    );
-    return rows.map((row: any) => ({
-      blocking_pid: row.blocking_pid,
-      blocked_pid: row.blocked_pid,
-      wait_event: row.wait_event ?? null,
-      database_name: row.database_name ?? null,
-      blocking_query: row.blocking_query ?? null,
-      blocked_query: row.blocked_query ?? null,
-    }));
-  } finally {
-    connection.release();
-  }
-}
-
-export async function closeAllPools() {
-  await mysqlConnector.closeAllPools();
-}

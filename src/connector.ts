@@ -56,13 +56,20 @@ export interface QueryResult {
   affectedRows?: number;
 }
 
-export interface BlockingChainInfo {
+export interface BlockingChain {
+  engine_id: string;
   blocking_pid: number;
   blocked_pid: number;
+  wait_duration_ms: number | null;
   wait_event: string | null;
-  database_name: string | null;
   blocking_query: string | null;
   blocked_query: string | null;
+  database_name: string | null;
+  wait_type: string | null;
+  status: string | null;
+  host_name: string | null;
+  program_name: string | null;
+  login_time: string | null;
 }
 
 /**
@@ -87,6 +94,9 @@ export interface DatabaseConnector {
 
   /** Run a raw SQL query (escape hatch for engine-specific queries) */
   query(engineId: string, config: import("./config.js").EngineConfig, sql: string): Promise<QueryResult>;
+
+  /** Get current blocking chains (blocked sessions + their blockers) */
+  getBlockingChains(engineId: string, config: import("./config.js").EngineConfig): Promise<BlockingChain[]>;
 
   /** Close all connection pools for this connector */
   closeAllPools(): Promise<void>;
