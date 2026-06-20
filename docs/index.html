@@ -227,14 +227,17 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 16px 20px;
-      margin-bottom: 8px;
+      padding: 10px 20px;
+      margin-bottom: 6px;
       font-family: 'JetBrains Mono', 'Fira Code', monospace;
       font-size: 13px;
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
     }
-    .arch-block .dir { color: var(--text-muted); }
-    .arch-block .file { color: var(--accent); }
-    .arch-block .desc { color: var(--text-muted); }
+    .arch-block .dir { color: var(--text-muted); min-width: 140px; }
+    .arch-block .file { color: var(--accent); min-width: 140px; }
+    .arch-block .desc { color: var(--text-muted); flex: 1; }
     .repl-demo {
       background: var(--code-bg);
       border: 1px solid var(--border);
@@ -697,17 +700,15 @@ docker compose down -v <span class="cmd-comment"># Stop and delete data</span></
 
       <h2 id="architecture">Architecture</h2>
       <div class="arch-block"><span class="dir">src/</span></div>
-      <div class="arch-block">  <span class="file">index.ts</span>        <span class="desc">— CLI entry point (commander, REPL)</span></div>
-      <div class="arch-block">  <span class="file">server.ts</span>       <span class="desc">— MCP server setup, tool registration</span></div>
-      <div class="arch-block">  <span class="file">config.ts</span>       <span class="desc">— YAML config loader with URL parsing</span></div>
-      <div class="arch-block">    <span class="file">connector.ts</span> <span class="desc">— DatabaseConnector interface + BlockingChain type (engine-agnostic)</span></div>
-      <div class="arch-block">  <span class="file">types.ts</span>         <span class="desc">— DELETED (consolidated into connector.ts)</span></div>
-      <div class="arch-block">  <span class="dir">connectors/</span></div>
-      <div class="arch-block">    <span class="file">mysql.ts</span> <span class="desc">— MySQLConnector (implements DatabaseConnector)</span></div>
-      <div class="arch-block">    <span class="file">postgres.ts</span> <span class="desc">— PostgreSQLConnector (implements DatabaseConnector)</span></div>
-      <div class="arch-block">  <span class="dir">tools/</span></div>
-      <div class="arch-block">    <span class="file">blocking-chains.ts</span> <span class="desc">— MCP tool schema + handler (connector map dispatch)</span></div>
-    </div>
+      <div class="arch-block"><span class="file">index.ts</span><span class="desc">CLI entry point (commander, REPL)</span></div>
+      <div class="arch-block"><span class="file">server.ts</span><span class="desc">MCP server setup + connector map + shutdown</span></div>
+      <div class="arch-block"><span class="file">config.ts</span><span class="desc">YAML config loader with URL parsing</span></div>
+      <div class="arch-block"><span class="file">connector.ts</span><span class="desc">DatabaseConnector interface + BlockingChain type (engine-agnostic)</span></div>
+      <div class="arch-block"><span class="dir">connectors/</span></div>
+      <div class="arch-block"><span class="file">mysql.ts</span><span class="desc">MySQLConnector (implements DatabaseConnector)</span></div>
+      <div class="arch-block"><span class="file">postgres.ts</span><span class="desc">PostgreSQLConnector (implements DatabaseConnector)</span></div>
+      <div class="arch-block"><span class="dir">tools/</span></div>
+      <div class="arch-block"><span class="file">blocking-chains.ts</span><span class="desc">MCP tool schema + handler (connector map dispatch)</span></div>
 
       <h4>Design decisions</h4>
       <ul>
