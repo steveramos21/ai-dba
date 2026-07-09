@@ -153,7 +153,7 @@ npm test            — run Vitest tests
 ### What was built:
 - 5 new MCP tools: `databases`, `tables`, `describe-table`, `indexes`, `processes` — all engine-agnostic via connector map dispatch
 - All tools support optional `database` parameter to override configured database (MySQL) or schema (PostgreSQL)
-- GitHub Actions CI workflow (`.github/workflows/ci.yml`) — Node 20/22 matrix, build + unit tests on every push/PR to main
+- GitHub Actions CI workflow (`.github/workflows/ci.yml`) — Node 20/22 matrix, build + unit tests on every push/PR to main. **Note:** CI file is ready but couldn't be pushed due to PAT lacking `workflow` scope — user must add via GitHub UI or workflow-scoped token.
 - 20 new unit tests (5 tools × 4 tests each) — happy path, unknown engine, unsupported type, connector error propagation
 - Fixed MySQL connector `listTables`/`describeTable`/`listIndexes` to accept `database` param and fall back to URL-parsed database for URL-only configs
 - Fixed PostgreSQL connector `listTables`/`describeTable`/`listIndexes` to accept `database` param as schema override
