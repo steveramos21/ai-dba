@@ -227,9 +227,18 @@ program
         head: [chalk.white("ID"), chalk.white("Type"), chalk.white("Host"), chalk.white("Port"), chalk.white("Database"), chalk.white("URL")],
       });
       for (const [id, engine] of entries) {
-        if (engine.url) {
+        if (engine.url && engine.type === "mysql") {
           const parsed = parseMysqlUrl(engine.url);
           table.push([chalk.cyan(id), engine.type, parsed.host, String(parsed.port), parsed.database, chalk.dim(engine.url)]);
+        } else if (engine.url) {
+          // PostgreSQL or other — mask the URL for display, extract via URL constructor
+          try {
+            const u = new URL(engine.url);
+            const masked = engine.url.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@");
+            table.push([chalk.cyan(id), engine.type, u.hostname, String(u.port || "5432"), u.pathname.slice(1) || "-", chalk.dim(masked)]);
+          } catch {
+            table.push([chalk.cyan(id), engine.type, "-", "-", "-", chalk.dim(engine.url)]);
+          }
         } else {
           table.push([chalk.cyan(id), engine.type, engine.host ?? "-", String(engine.port ?? 3306), engine.database ?? "-", "-"]);
         }
@@ -468,9 +477,17 @@ async function startRepl(
         });
         for (const [id, engine] of Object.entries(config.engines)) {
           const marker = id === currentEngine ? chalk.green(" *") : "";
-          if (engine.url) {
+          if (engine.url && engine.type === "mysql") {
             const parsed = parseMysqlUrl(engine.url);
             table.push([id + marker, engine.type, parsed.host, String(parsed.port), parsed.database, chalk.dim(engine.url)]);
+          } else if (engine.url) {
+            try {
+              const u = new URL(engine.url);
+              const masked = engine.url.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@");
+              table.push([id + marker, engine.type, u.hostname, String(u.port || "5432"), u.pathname.slice(1) || "-", chalk.dim(masked)]);
+            } catch {
+              table.push([id + marker, engine.type, "-", "-", "-", chalk.dim(engine.url)]);
+            }
           } else {
             table.push([id + marker, engine.type, engine.host ?? "-", String(engine.port ?? 3306), engine.database ?? "-", "-"]);
           }

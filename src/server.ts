@@ -4,6 +4,11 @@ import type { DatabaseConnector } from "./connector.js";
 import { mysqlConnector } from "./connectors/mysql.js";
 import { postgresConnector } from "./connectors/postgres.js";
 import { registerBlockingChainsTool } from "./tools/blocking-chains.js";
+import { registerDatabasesTool } from "./tools/databases.js";
+import { registerTablesTool } from "./tools/tables.js";
+import { registerDescribeTableTool } from "./tools/describe-table.js";
+import { registerIndexesTool } from "./tools/indexes.js";
+import { registerProcessesTool } from "./tools/processes.js";
 
 /**
  * Build the connector map for all supported engine types.
@@ -28,6 +33,11 @@ export function createServer(config: AiDbaConfig): McpServer {
 
   // Register tools
   registerBlockingChainsTool(server, config, connectors);
+  registerDatabasesTool(server, config, connectors);
+  registerTablesTool(server, config, connectors);
+  registerDescribeTableTool(server, config, connectors);
+  registerIndexesTool(server, config, connectors);
+  registerProcessesTool(server, config, connectors);
 
   return server;
 }

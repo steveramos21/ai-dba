@@ -42,29 +42,37 @@ export class PostgreSQLConnector implements DatabaseConnector {
     }
   }
 
-  async listTables(engineId: string, config: EngineConfig): Promise<TableInfo[]> {
+  async listTables(engineId: string, config: EngineConfig, database?: string): Promise<TableInfo[]> {
     const pool = this.getPool(engineId, config);
     const client = await pool.connect();
     try {
+      if (database) {
+        // Filter by specific schema name
+        const res = await client.query(
+          "SELECT tablename as name, schemaname as schema FROM pg_tables WHERE schemaname = $1",
+          [database]
+        );
+        return res.rows.map((row: any) => ({ name: row.name, schema: row.schema }));
+      }
       const res = await client.query(
         "SELECT tablename as name, schemaname as schema FROM pg_tables WHERE schemaname = ANY(current_schemas(false))"
       );
-      return res.rows.map((row: any) => ({
-        name: row.name,
-        schema: row.schema,
-      }));
+      return res.rows.map((row: any) => ({ name: row.name, schema: row.schema }));
     } finally {
       client.release();
     }
   }
 
-  async describeTable(engineId: string, config: EngineConfig, tableName: string): Promise<ColumnInfo[]> {
+  async describeTable(engineId: string, config: EngineConfig, tableName: string, database?: string): Promise<ColumnInfo[]> {
     const pool = this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       let schema = "public";
       let table = tableName;
-      if (tableName.includes(".")) {
+      // Explicit database param overrides schema-qualified table name
+      if (database) {
+        schema = database;
+      } else if (tableName.includes(".")) {
         const parts = tableName.split(".");
         schema = parts[0];
         table = parts[1];
@@ -105,13 +113,16 @@ export class PostgreSQLConnector implements DatabaseConnector {
     }
   }
 
-  async listIndexes(engineId: string, config: EngineConfig, tableName: string): Promise<IndexInfo[]> {
+  async listIndexes(engineId: string, config: EngineConfig, tableName: string, database?: string): Promise<IndexInfo[]> {
     const pool = this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       let schema = "public";
       let table = tableName;
-      if (tableName.includes(".")) {
+      // Explicit database param overrides schema-qualified table name
+      if (database) {
+        schema = database;
+      } else if (tableName.includes(".")) {
         const parts = tableName.split(".");
         schema = parts[0];
         table = parts[1];

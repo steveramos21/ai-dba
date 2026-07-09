@@ -8,9 +8,15 @@ AI-DBA is a universal database diagnostics copilot — an **MCP server** that ex
 src/index.ts        — CLI entry (Commander); commands: serve, repl, connect, list-engines, blocking-chains
 src/server.ts       — McpServer setup; registers all MCP tools; handles graceful shutdown (SIGINT/SIGTERM → closeAllPools)
 src/config.ts       — Loads config.yaml via js-yaml; parseMysqlUrl() for MySQL URLs
-src/connector.ts    — DatabaseConnector interface + shared types (QueryResult, BlockingChainInfo)
+src/connector.ts    — DatabaseConnector interface + shared types (QueryResult, BlockingChain)
 src/connectors/     — Per-engine implementations: mysql.ts (mysql2/promise), postgres.ts (pg)
-src/tools/          — MCP tool registrations; each tool calls a connector method
+src/tools/          — MCP tool registrations; one file per tool, each calls a connector method
+  blocking-chains.ts  — blocking chain diagnostics
+  databases.ts        — list databases/schemas
+  tables.ts           — list tables (optional database/schema param)
+  describe-table.ts   — column metadata (optional database/schema param)
+  indexes.ts          — list indexes (optional database/schema param)
+  processes.ts        — active processes/connections
 ```
 
 ## Build & Test

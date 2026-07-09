@@ -19,7 +19,7 @@ engines:
   # PostgreSQL (connection URL — pass-through to pg driver)
   postgres-test:
     type: postgres
-    url: postgresql://postgres:testpassword@127.0.0.1:15432/testdb
+    url: postgresql://postgres@127.0.0.1:15432/testdb
 
   # PostgreSQL with SSL
   # postgres-prod:

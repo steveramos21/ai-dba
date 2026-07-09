@@ -11,6 +11,7 @@ Universal database copilot — diagnostics, operations, and performance analysis
 - **Database-agnostic commands** — `databases`, `tables`, `describe`, `indexes`, `processes` work across engines
 - **Multi-engine support** — MySQL and PostgreSQL connectors, more engines coming
 - **MySQL blocking chains** — detect and report row-level blocking with full query details
+- **GitHub Actions CI** — build + test on Node 20/22, runs on every push/PR to main
 
 ## Quick Start
 
@@ -212,9 +213,18 @@ Starts an MCP server over stdio. Used by AI agents to call database diagnostics 
 }
 ```
 
-The server exposes one tool:
+The server exposes six tools:
 
-- **`blocking-chains`** — parameters: `engineId` (string, required)
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `blocking-chains` | `engineId` (string, required) | Show current blocking chains |
+| `databases` | `engineId` (string, required) | List databases/schemas on the server |
+| `tables` | `engineId` (string, required), `database` (string, optional) | List tables in a database/schema |
+| `describe-table` | `engineId` (string, required), `table` (string, required), `database` (string, optional) | Show column metadata for a table |
+| `indexes` | `engineId` (string, required), `table` (string, required), `database` (string, optional) | List indexes on a table |
+| `processes` | `engineId` (string, required) | List active database connections/processes |
+
+All tools return JSON. The `database` parameter overrides the engine's configured database (MySQL) or schema (PostgreSQL).
 
 ## Docker Test Environment
 
@@ -276,6 +286,18 @@ docker compose down
 
 Add `-v` to also delete the data volume.
 
+### Integration tests (require Docker)
+
+```bash
+# All connector methods against live MySQL + PostgreSQL (49 tests)
+npm run test:integration
+
+# Live blocking scenarios — creates real locks, validates detection (21 tests)
+npm run test:blocking
+```
+
+These tests catch bugs that mocked unit tests cannot — they exercise real SQL against MySQL 8.0 and PostgreSQL 16.
+
 ## Configuration
 
 `config.yaml` format:
@@ -331,7 +353,7 @@ engines:
     database: app_db
   postgres-analytics:
     type: postgres
-    url: postgresql:***@analytics-db.internal:5432/warehouse?sslmode=require
+    url: postgresql://readonly:***@analytics-db.internal:5432/warehouse?sslmode=require
 ```
 
 **Security:** Add `config.yaml` to `.gitignore` (already included by default).
@@ -348,13 +370,19 @@ src/
     mysql.ts            MySQLConnector (implements DatabaseConnector)
     postgres.ts         PostgreSQLConnector (implements DatabaseConnector)
   tools/
-    blocking-chains.ts  MCP tool definition + handler
+    blocking-chains.ts  MCP tool — blocking chain diagnostics
+    databases.ts        MCP tool — list databases/schemas
+    tables.ts           MCP tool — list tables
+    describe-table.ts   MCP tool — column metadata
+    indexes.ts          MCP tool — list indexes
+    processes.ts        MCP tool — active processes/connections
 ```
 
 - **DatabaseConnector interface** — standard commands (`databases`, `tables`, `describe`, `indexes`, `processes`, `query`) that work across engines. MySQL and PostgreSQL are implemented; SQL Server, Oracle, and MongoDB are planned.
 - **Lazy imports** — MCP SDK, mysql2, and pg are loaded dynamically only when needed. CLI commands like `list-engines` start instantly without loading database drivers.
 - **Lazy connection pools** — Database connections are created on first use, not at startup.
-- **One tool per file** — `src/tools/blocking-chains.ts` is self-contained (schema + handler). Adding a new tool means adding a new file and registering it in `server.ts`.
+- **One tool per file** — each `src/tools/*.ts` file is self-contained (schema + handler). Adding a new tool means adding a new file and registering it in `server.ts`.
+- **GitHub Actions CI** — `.github/workflows/ci.yml` runs build + unit tests on Node 20/22 for every push/PR to main.
 
 ## Requirements
 

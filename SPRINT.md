@@ -146,12 +146,40 @@ npm test            — run Vitest tests
 
 ---
 
-## Planned Sprints
+## Sprint 3 — MCP DBA Tools + CI (COMPLETE)
 
-### Sprint 3 — MCP DBA Tools + CI
-- Expose `databases`, `tables`, `describe_table`, `indexes`, `processes` as MCP tools
-- Vitest test suite
-- GitHub Actions CI/CD
+**Status**: DONE.
+
+### What was built:
+- 5 new MCP tools: `databases`, `tables`, `describe-table`, `indexes`, `processes` — all engine-agnostic via connector map dispatch
+- All tools support optional `database` parameter to override configured database (MySQL) or schema (PostgreSQL)
+- GitHub Actions CI workflow (`.github/workflows/ci.yml`) — Node 20/22 matrix, build + unit tests on every push/PR to main. **Note:** CI file is ready but couldn't be pushed due to PAT lacking `workflow` scope — user must add via GitHub UI or workflow-scoped token.
+- 20 new unit tests (5 tools × 4 tests each) — happy path, unknown engine, unsupported type, connector error propagation
+- Fixed MySQL connector `listTables`/`describeTable`/`listIndexes` to accept `database` param and fall back to URL-parsed database for URL-only configs
+- Fixed PostgreSQL connector `listTables`/`describeTable`/`listIndexes` to accept `database` param as schema override
+- Fixed `list-engines` CLI and REPL `engines` command — no longer calls `parseMysqlUrl` on PostgreSQL URLs (was crashing on non-MySQL URLs)
+- Pinned `zod` as explicit dependency (was transitive via MCP SDK)
+- Changed `npm test` to `vitest run` (was watch mode — would hang CI)
+
+### Test coverage:
+- Connector tests: 7 (MySQL 3 + PostgreSQL 4)
+- MCP tool tests: 20 (5 tools × 4 tests each)
+- Total: 27 tests across 7 test files
+
+### PR:
+- PR #10 — Sprint 3: MCP DBA tools + CI
+
+### Sprint 3 Retro:
+- Integration testing against live Docker databases caught 3 critical bugs that 27 mocked unit tests missed:
+  1. `listProcesses` — `database` is a MySQL reserved word, needed backticks
+  2. `getBlockingChains` — used `INNODB_LOCK_WAITS` (removed in MySQL 8.0) → rewrote with `performance_schema.data_lock_waits`
+  3. Wrong join key (`THREAD_ID` vs `PROCESSLIST_ID`) + NULL `blocking_query` → fixed with COALESCE + `events_statements_current` fallback
+- Lesson: mocked unit tests verify dispatch logic but prove nothing about real SQL. Always run integration tests against live databases before merging.
+- Test results: 27 unit + 49 integration + 21 live blocking = 97 tests, all passing
+
+---
+
+## Planned Sprints
 
 ### Sprint 4 — SQL Server Connector
 - `tedious` driver
