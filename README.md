@@ -286,6 +286,18 @@ docker compose down
 
 Add `-v` to also delete the data volume.
 
+### Integration tests (require Docker)
+
+```bash
+# All connector methods against live MySQL + PostgreSQL (49 tests)
+npm run test:integration
+
+# Live blocking scenarios — creates real locks, validates detection (21 tests)
+npm run test:blocking
+```
+
+These tests catch bugs that mocked unit tests cannot — they exercise real SQL against MySQL 8.0 and PostgreSQL 16.
+
 ## Configuration
 
 `config.yaml` format:

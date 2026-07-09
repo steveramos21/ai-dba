@@ -14,7 +14,9 @@
     "list-engines": "node dist/index.js --config config.yaml list-engines",
     "connect": "node dist/index.js --config config.yaml connect",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:integration": "node test/integration-all.mjs",
+    "test:blocking": "node test/integration-blocking.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
