@@ -13,7 +13,8 @@
     "blocking-chains": "node dist/index.js --config config.yaml blocking-chains",
     "list-engines": "node dist/index.js --config config.yaml list-engines",
     "connect": "node dist/index.js --config config.yaml connect",
-    "test": "vitest"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -23,7 +24,8 @@
     "inquirer": "^14.0.2",
     "js-yaml": "^4.1.0",
     "mysql2": "^3.0.0",
-    "pg": "^8.21.0"
+    "pg": "^8.21.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

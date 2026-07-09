@@ -146,12 +146,32 @@ npm test            — run Vitest tests
 
 ---
 
-## Planned Sprints
+## Sprint 3 — MCP DBA Tools + CI (COMPLETE)
 
-### Sprint 3 — MCP DBA Tools + CI
-- Expose `databases`, `tables`, `describe_table`, `indexes`, `processes` as MCP tools
-- Vitest test suite
-- GitHub Actions CI/CD
+**Status**: DONE.
+
+### What was built:
+- 5 new MCP tools: `databases`, `tables`, `describe-table`, `indexes`, `processes` — all engine-agnostic via connector map dispatch
+- All tools support optional `database` parameter to override configured database (MySQL) or schema (PostgreSQL)
+- GitHub Actions CI workflow (`.github/workflows/ci.yml`) — Node 20/22 matrix, build + unit tests on every push/PR to main
+- 20 new unit tests (5 tools × 4 tests each) — happy path, unknown engine, unsupported type, connector error propagation
+- Fixed MySQL connector `listTables`/`describeTable`/`listIndexes` to accept `database` param and fall back to URL-parsed database for URL-only configs
+- Fixed PostgreSQL connector `listTables`/`describeTable`/`listIndexes` to accept `database` param as schema override
+- Fixed `list-engines` CLI and REPL `engines` command — no longer calls `parseMysqlUrl` on PostgreSQL URLs (was crashing on non-MySQL URLs)
+- Pinned `zod` as explicit dependency (was transitive via MCP SDK)
+- Changed `npm test` to `vitest run` (was watch mode — would hang CI)
+
+### Test coverage:
+- Connector tests: 7 (MySQL 3 + PostgreSQL 4)
+- MCP tool tests: 20 (5 tools × 4 tests each)
+- Total: 27 tests across 7 test files
+
+### PR:
+- PR: TBD (Sprint 3: MCP DBA tools + CI)
+
+---
+
+## Planned Sprints
 
 ### Sprint 4 — SQL Server Connector
 - `tedious` driver

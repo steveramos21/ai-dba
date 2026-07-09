@@ -1,4 +1,5 @@
 import mysql, { type Pool, type RowDataPacket } from "mysql2/promise";
+import { resolveMysqlConfig } from "../config.js";
 import type { EngineConfig } from "../config.js";
 import type {
   DatabaseConnector,
@@ -51,13 +52,16 @@ export class MySQLConnector implements DatabaseConnector {
     }
   }
 
-  async listTables(engineId: string, config: EngineConfig): Promise<TableInfo[]> {
+  async listTables(engineId: string, config: EngineConfig, database?: string): Promise<TableInfo[]> {
     const pool = this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
+      const resolved = config.url ? resolveMysqlConfig(engineId, config) : undefined;
+      const dbName = database || config.database || resolved?.database;
+      if (!dbName) throw new Error(`No database specified for engine "${engineId}". Pass a database parameter or configure one in config.yaml.`);
       const [rows] = await connection.query<RowDataPacket[]>(
         "SELECT TABLE_NAME as name, TABLE_ROWS as `rows`, DATA_LENGTH as sizeBytes, ENGINE as engine, TABLE_COLLATION as collation FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = ?",
-        [config.database]
+        [dbName]
       );
       return rows.map((row) => ({
         name: row.name,
@@ -71,10 +75,13 @@ export class MySQLConnector implements DatabaseConnector {
     }
   }
 
-  async describeTable(engineId: string, config: EngineConfig, tableName: string): Promise<ColumnInfo[]> {
+  async describeTable(engineId: string, config: EngineConfig, tableName: string, database?: string): Promise<ColumnInfo[]> {
     const pool = this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
+      const resolved = config.url ? resolveMysqlConfig(engineId, config) : undefined;
+      const dbName = database || config.database || resolved?.database;
+      if (!dbName) throw new Error(`No database specified for engine "${engineId}". Pass a database parameter or configure one in config.yaml.`);
       const [rows] = await connection.query<RowDataPacket[]>(
         `SELECT
           COLUMN_NAME as name,
@@ -86,7 +93,7 @@ export class MySQLConnector implements DatabaseConnector {
           COLUMN_COMMENT as comment
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`,
-        [config.database, tableName]
+        [dbName, tableName]
       );
       return rows.map((row: any) => ({
         name: row.name,
@@ -102,10 +109,13 @@ export class MySQLConnector implements DatabaseConnector {
     }
   }
 
-  async listIndexes(engineId: string, config: EngineConfig, tableName: string): Promise<IndexInfo[]> {
+  async listIndexes(engineId: string, config: EngineConfig, tableName: string, database?: string): Promise<IndexInfo[]> {
     const pool = this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
+      const resolved = config.url ? resolveMysqlConfig(engineId, config) : undefined;
+      const dbName = database || config.database || resolved?.database;
+      if (!dbName) throw new Error(`No database specified for engine "${engineId}". Pass a database parameter or configure one in config.yaml.`);
       const [rows] = await connection.query<RowDataPacket[]>(
         `SELECT
           s.INDEX_NAME as name,
@@ -117,7 +127,7 @@ export class MySQLConnector implements DatabaseConnector {
         WHERE s.TABLE_SCHEMA = ? AND s.TABLE_NAME = ?
         GROUP BY s.INDEX_NAME, s.TABLE_NAME, s.NON_UNIQUE, s.INDEX_TYPE
         ORDER BY s.INDEX_NAME`,
-        [config.database, tableName]
+        [dbName, tableName]
       );
       return rows.map((row: any) => ({
         name: row.name,

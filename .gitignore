@@ -5,3 +5,4 @@ dist/
 config.yaml
 *.pyc
 .claude/
+test/test-manual-all.*
