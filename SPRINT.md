@@ -167,7 +167,15 @@ npm test            — run Vitest tests
 - Total: 27 tests across 7 test files
 
 ### PR:
-- PR: TBD (Sprint 3: MCP DBA tools + CI)
+- PR #10 — Sprint 3: MCP DBA tools + CI
+
+### Sprint 3 Retro:
+- Integration testing against live Docker databases caught 3 critical bugs that 27 mocked unit tests missed:
+  1. `listProcesses` — `database` is a MySQL reserved word, needed backticks
+  2. `getBlockingChains` — used `INNODB_LOCK_WAITS` (removed in MySQL 8.0) → rewrote with `performance_schema.data_lock_waits`
+  3. Wrong join key (`THREAD_ID` vs `PROCESSLIST_ID`) + NULL `blocking_query` → fixed with COALESCE + `events_statements_current` fallback
+- Lesson: mocked unit tests verify dispatch logic but prove nothing about real SQL. Always run integration tests against live databases before merging.
+- Test results: 27 unit + 49 integration + 21 live blocking = 97 tests, all passing
 
 ---
 

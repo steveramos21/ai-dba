@@ -112,11 +112,12 @@ describe("MySQLConnector", () => {
     expect(c.program_name).toBeNull();
     expect(c.login_time).toBe("2026-06-20 10:30:00");
 
-    // Verify the SQL uses the corrected 4-join query (not the old broken one)
+    // Verify the SQL uses the MySQL 8.0+ data_lock_waits query (not the old INNODB_LOCK_WAITS)
     const sql = mockConnection.query.mock.calls[0][0] as string;
-    expect(sql).toContain("blocking_thd.trx_mysql_thread_id");
-    expect(sql).toContain("blocked_thd.trx_mysql_thread_id");
-    expect(sql).toContain("performance_schema.threads");
-    expect(sql).not.toContain("r.trx_mysql_thread_id as blocking_pid");
+    expect(sql).toContain("performance_schema.data_lock_waits");
+    expect(sql).toContain("BLOCKING_ENGINE_TRANSACTION_ID");
+    expect(sql).toContain("REQUESTING_ENGINE_TRANSACTION_ID");
+    expect(sql).toContain("PROCESSLIST_ID");
+    expect(sql).not.toContain("INNODB_LOCK_WAITS");
   });
 });

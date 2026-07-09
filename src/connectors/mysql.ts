@@ -147,7 +147,7 @@ export class MySQLConnector implements DatabaseConnector {
     const connection = await pool.getConnection();
     try {
       const [rows] = await connection.query<RowDataPacket[]>(
-        "SELECT ID as pid, USER as user, HOST as host, DB as database, COMMAND as command, TIME as time, STATE as state, INFO as query FROM INFORMATION_SCHEMA.PROCESSLIST WHERE ID != CONNECTION_ID()"
+        "SELECT ID as pid, USER as `user`, HOST as `host`, DB as `database`, COMMAND as `command`, TIME as `time`, STATE as `state`, INFO as `query` FROM INFORMATION_SCHEMA.PROCESSLIST WHERE ID != CONNECTION_ID()"
       );
       return rows.map((row: any) => ({
         pid: row.pid,
@@ -200,25 +200,27 @@ export class MySQLConnector implements DatabaseConnector {
     const pool = this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
+      // MySQL 8.0+ uses performance_schema.data_lock_waits (INNODB_LOCK_WAITS was removed)
       const [rows] = await connection.query<RowDataPacket[]>(
         `SELECT
-          blocking_thd.trx_mysql_thread_id  AS blocking_pid,
-          blocked_thd.trx_mysql_thread_id   AS blocked_pid,
+          blocking_ps.PROCESSLIST_ID    AS blocking_pid,
+          blocked_ps.PROCESSLIST_ID     AS blocked_pid,
           TIMESTAMPDIFF(MICROSECOND, blocked_thd.trx_wait_started, NOW()) DIV 1000 AS wait_duration_ms,
-          blocked_thd.trx_state             AS wait_event,
-          blocking_thd.trx_query            AS blocking_query,
-          blocked_thd.trx_query             AS blocked_query,
-          blocked_ps.PROCESSLIST_DB         AS database_name,
-          NULL                              AS wait_type,
-          blocked_ps.PROCESSLIST_STATE      AS status,
-          blocked_ps.PROCESSLIST_HOST       AS host_name,
-          NULL                              AS program_name,
-          blocked_ps.CREATE_TIME            AS login_time
-        FROM information_schema.INNODB_LOCK_WAITS w
-        JOIN information_schema.INNODB_TRX blocking_thd ON blocking_thd.trx_id = w.blocking_trx_id
-        JOIN information_schema.INNODB_TRX blocked_thd  ON blocked_thd.trx_id  = w.requesting_trx_id
-        LEFT JOIN performance_schema.threads blocked_ps   ON blocked_ps.THREAD_ID   = blocked_thd.trx_mysql_thread_id
-        LEFT JOIN performance_schema.threads blocking_ps  ON blocking_ps.THREAD_ID  = blocking_thd.trx_mysql_thread_id`
+          blocked_thd.trx_state         AS wait_event,
+          COALESCE(blocking_thd.trx_query, blocking_ps.PROCESSLIST_INFO, blocking_esc.SQL_TEXT) AS blocking_query,
+          COALESCE(blocked_thd.trx_query, blocked_ps.PROCESSLIST_INFO) AS blocked_query,
+          blocked_ps.PROCESSLIST_DB     AS database_name,
+          NULL                          AS wait_type,
+          blocked_ps.PROCESSLIST_STATE  AS status,
+          blocked_ps.PROCESSLIST_HOST   AS host_name,
+          NULL                          AS program_name,
+          NULL                          AS login_time
+        FROM performance_schema.data_lock_waits w
+        JOIN information_schema.INNODB_TRX blocking_thd ON blocking_thd.trx_id = w.BLOCKING_ENGINE_TRANSACTION_ID
+        JOIN information_schema.INNODB_TRX blocked_thd  ON blocked_thd.trx_id  = w.REQUESTING_ENGINE_TRANSACTION_ID
+        LEFT JOIN performance_schema.threads blocked_ps  ON blocked_ps.PROCESSLIST_ID  = blocked_thd.trx_mysql_thread_id
+        LEFT JOIN performance_schema.threads blocking_ps ON blocking_ps.PROCESSLIST_ID = blocking_thd.trx_mysql_thread_id
+        LEFT JOIN performance_schema.events_statements_current blocking_esc ON blocking_esc.THREAD_ID = blocking_ps.THREAD_ID`
       );
       return rows.map((row: any) => ({
         engine_id: engineId,
