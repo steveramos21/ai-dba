@@ -1,18 +1,20 @@
 // Integration test — exercises all connector methods against live Docker databases
-// Requires: docker compose up -d (MySQL 13306, PostgreSQL 15432, SQL Server 11433, Oracle 11521)
+// Requires: docker compose up -d (MySQL 13306, PostgreSQL 15432, SQL Server 11433, Oracle 11521, MongoDB 12017)
 import { mysqlConnector } from '../dist/connectors/mysql.js';
 import { postgresConnector } from '../dist/connectors/postgres.js';
 import { sqlserverConnector } from '../dist/connectors/sqlserver.js';
 import { oracleConnector } from '../dist/connectors/oracle.js';
+import { mongodbConnector } from '../dist/connectors/mongodb.js';
 
 const engines = {
   'mysql-test': { type: 'mysql', host: '127.0.0.1', port: 13306, user: 'root', password: 'testpassword', database: 'testdb' },
   'pg-test': { type: 'postgres', url: 'postgresql://postgres@127.0.0.1:15432/testdb' },
   'sqlserver-test': { type: 'sqlserver', url: 'sqlserver://sa:TestPassword123!@127.0.0.1:11433/testdb' },
   'oracle-test': { type: 'oracle', url: 'oracle://testuser:testpassword@127.0.0.1:11521/XEPDB1' },
+  'mongodb-test': { type: 'mongodb', url: 'mongodb://testuser:testpassword@127.0.0.1:12017/testdb?authSource=admin' },
 };
 
-const connectors = { mysql: mysqlConnector, postgres: postgresConnector, sqlserver: sqlserverConnector, oracle: oracleConnector };
+const connectors = { mysql: mysqlConnector, postgres: postgresConnector, sqlserver: sqlserverConnector, oracle: oracleConnector, mongodb: mongodbConnector };
 
 let passed = 0, failed = 0;
 const results = [];
@@ -24,6 +26,7 @@ function assert(name, cond, detail = '') {
 
 async function testEngine(engineId, engineConfig, connector) {
   const label = `[${engineId}]`;
+  const isMongo = engineConfig.type === 'mongodb';
   console.log(`\n=== ${label} ===`);
 
   // 1. listDatabases
@@ -31,7 +34,6 @@ async function testEngine(engineId, engineConfig, connector) {
     const dbs = await connector.listDatabases(engineId, engineConfig);
     assert(`${label} listDatabases returns array`, Array.isArray(dbs));
     if (engineConfig.type === 'oracle') {
-      // Oracle returns schema/user names, not database names
       assert(`${label} listDatabases has TESTUSER`, dbs.some(d => d.name === 'TESTUSER'), `got: ${dbs.map(d=>d.name).join(',')}`);
     } else {
       assert(`${label} listDatabases has testdb`, dbs.some(d => d.name === 'testdb'), `got: ${dbs.map(d=>d.name).join(',')}`);
@@ -44,7 +46,6 @@ async function testEngine(engineId, engineConfig, connector) {
     const tables = await connector.listTables(engineId, engineConfig);
     assert(`${label} listTables returns array`, Array.isArray(tables));
     if (engineConfig.type === 'oracle') {
-      // Oracle stores identifiers in uppercase
       assert(`${label} listTables has BLOCKING_TEST`, tables.some(t => t.name === 'BLOCKING_TEST'), `got: ${tables.map(t=>t.name).join(',')}`);
     } else {
       assert(`${label} listTables has blocking_test`, tables.some(t => t.name === 'blocking_test'), `got: ${tables.map(t=>t.name).join(',')}`);
@@ -66,6 +67,9 @@ async function testEngine(engineId, engineConfig, connector) {
     } else if (engineConfig.type === 'oracle') {
       const tables = await connector.listTables(engineId, engineConfig, 'TESTUSER');
       assert(`${label} listTables(TESTUSER) has BLOCKING_TEST`, tables.some(t => t.name === 'BLOCKING_TEST'), `got: ${tables.map(t=>t.name).join(',')}`);
+    } else if (isMongo) {
+      const tables = await connector.listTables(engineId, engineConfig, 'testdb');
+      assert(`${label} listTables(testdb) has blocking_test`, tables.some(t => t.name === 'blocking_test'), `got: ${tables.map(t=>t.name).join(',')}`);
     }
   } catch (e) { assert(`${label} listTables(database override)`, false, e.message); }
 
@@ -73,16 +77,25 @@ async function testEngine(engineId, engineConfig, connector) {
   try {
     const cols = await connector.describeTable(engineId, engineConfig, 'blocking_test');
     assert(`${label} describeTable returns array`, Array.isArray(cols));
-    assert(`${label} describeTable has id column`, cols.some(c => c.name === 'ID' || c.name === 'id'), `got: ${cols.map(c=>c.name).join(',')}`);
-    const idCol = cols.find(c => c.name === 'ID' || c.name === 'id');
-    assert(`${label} describeTable id is primary key`, idCol?.isPrimary === true);
-    assert(`${label} describeTable id is auto-increment`, idCol?.isAutoIncrement === true);
-    if (engineConfig.type === 'mysql') {
-      const nameCol = cols.find(c => c.name === 'name');
-      assert(`${label} describeTable name is varchar`, nameCol?.type.includes('varchar'), `got: ${nameCol?.type}`);
-    } else if (engineConfig.type === 'oracle') {
-      const nameCol = cols.find(c => c.name === 'NAME');
-      assert(`${label} describeTable name is VARCHAR2`, nameCol?.type.includes('VARCHAR2'), `got: ${nameCol?.type}`);
+    if (isMongo) {
+      // MongoDB: _id is the primary key, type ObjectId
+      assert(`${label} describeTable has _id column`, cols.some(c => c.name === '_id'), `got: ${cols.map(c=>c.name).join(',')}`);
+      const idCol = cols.find(c => c.name === '_id');
+      assert(`${label} describeTable _id is primary key`, idCol?.isPrimary === true);
+      assert(`${label} describeTable _id is ObjectId`, idCol?.type === 'ObjectId', `got: ${idCol?.type}`);
+      assert(`${label} describeTable has name field`, cols.some(c => c.name === 'name'), `got: ${cols.map(c=>c.name).join(',')}`);
+    } else {
+      assert(`${label} describeTable has id column`, cols.some(c => c.name === 'ID' || c.name === 'id'), `got: ${cols.map(c=>c.name).join(',')}`);
+      const idCol = cols.find(c => c.name === 'ID' || c.name === 'id');
+      assert(`${label} describeTable id is primary key`, idCol?.isPrimary === true);
+      assert(`${label} describeTable id is auto-increment`, idCol?.isAutoIncrement === true);
+      if (engineConfig.type === 'mysql') {
+        const nameCol = cols.find(c => c.name === 'name');
+        assert(`${label} describeTable name is varchar`, nameCol?.type.includes('varchar'), `got: ${nameCol?.type}`);
+      } else if (engineConfig.type === 'oracle') {
+        const nameCol = cols.find(c => c.name === 'NAME');
+        assert(`${label} describeTable name is VARCHAR2`, nameCol?.type.includes('VARCHAR2'), `got: ${nameCol?.type}`);
+      }
     }
   } catch (e) { assert(`${label} describeTable`, false, e.message); }
 
@@ -90,14 +103,13 @@ async function testEngine(engineId, engineConfig, connector) {
   try {
     const idxs = await connector.listIndexes(engineId, engineConfig, 'blocking_test');
     assert(`${label} listIndexes returns array`, Array.isArray(idxs));
-    if (engineConfig.type === 'oracle') {
-      // Oracle PK index names start with SYS_C*
-      assert(`${label} listIndexes has primary`, idxs.some(i => i.isPrimary === true), `got: ${idxs.map(i=>i.name).join(',')}`);
-    } else {
-      assert(`${label} listIndexes has PRIMARY or _pkey`, idxs.some(i => i.isPrimary === true), `got: ${idxs.map(i=>i.name).join(',')}`);
-    }
+    assert(`${label} listIndexes has primary`, idxs.some(i => i.isPrimary === true), `got: ${idxs.map(i=>i.name).join(',')}`);
     const pk = idxs.find(i => i.isPrimary);
-    assert(`${label} listIndexes PK has id column`, pk?.columns.includes('ID') || pk?.columns.includes('id'), `got: ${pk?.columns}`);
+    if (isMongo) {
+      assert(`${label} listIndexes PK has _id column`, pk?.columns.includes('_id'), `got: ${pk?.columns}`);
+    } else {
+      assert(`${label} listIndexes PK has id column`, pk?.columns.includes('ID') || pk?.columns.includes('id'), `got: ${pk?.columns}`);
+    }
     assert(`${label} listIndexes PK is unique`, pk?.isUnique === true);
   } catch (e) { assert(`${label} listIndexes`, false, e.message); }
 
@@ -106,7 +118,7 @@ async function testEngine(engineId, engineConfig, connector) {
     const procs = await connector.listProcesses(engineId, engineConfig);
     assert(`${label} listProcesses returns array`, Array.isArray(procs));
     if (procs.length > 0) {
-      assert(`${label} listProcesses has pid field`, typeof procs[0].pid === 'number');
+      assert(`${label} listProcesses has pid field`, typeof procs[0].pid === 'number' || typeof procs[0].pid === 'string');
       assert(`${label} listProcesses has user field`, typeof procs[0].user === 'string');
     } else {
       assert(`${label} listProcesses returns array (empty ok)`, true);
@@ -115,26 +127,35 @@ async function testEngine(engineId, engineConfig, connector) {
 
   // 7. query (read-only)
   try {
-    // Oracle requires FROM DUAL for bare SELECT
-    const querySql = engineConfig.type === 'oracle'
-      ? 'SELECT 1 AS val FROM DUAL'
-      : 'SELECT 1 as val';
-    const result = await connector.query(engineId, engineConfig, querySql);
-    // Oracle uppercases column names by default
-    const valCol = result.columns.find(c => c === 'VAL' || c === 'val');
-    assert(`${label} query SELECT 1 returns columns`, !!valCol, `got: ${result.columns.join(',')}`);
-    assert(`${label} query SELECT 1 returns rows`, result.rows.length === 1);
-    const row = result.rows[0];
-    const val = row.VAL ?? row.val;
-    assert(`${label} query SELECT 1 value is 1`, Number(val) === 1, `got: ${val}`);
+    let result;
+    if (isMongo) {
+      // MongoDB query is a JSON command document
+      result = await connector.query(engineId, engineConfig, JSON.stringify({ find: 'blocking_test', filter: {}, limit: 1 }));
+      assert(`${label} query find returns columns`, result.columns.length > 0, `got: ${result.columns.join(',')}`);
+      assert(`${label} query find returns rows`, result.rows.length === 1);
+      assert(`${label} query find has name field`, result.rows[0].name !== undefined, `got: ${JSON.stringify(result.rows[0])}`);
+    } else {
+      const querySql = engineConfig.type === 'oracle' ? 'SELECT 1 AS val FROM DUAL' : 'SELECT 1 as val';
+      result = await connector.query(engineId, engineConfig, querySql);
+      const valCol = result.columns.find(c => c === 'VAL' || c === 'val');
+      assert(`${label} query SELECT 1 returns columns`, !!valCol, `got: ${result.columns.join(',')}`);
+      assert(`${label} query SELECT 1 returns rows`, result.rows.length === 1);
+      const row = result.rows[0];
+      const val = row.VAL ?? row.val;
+      assert(`${label} query SELECT 1 value is 1`, Number(val) === 1, `got: ${val}`);
+    }
   } catch (e) { assert(`${label} query`, false, e.message); }
 
   // 8. query rejects non-read-only
   try {
-    await connector.query(engineId, engineConfig, 'DROP TABLE nonexistent_xyz');
-    assert(`${label} query rejects DROP`, false, 'should have thrown');
+    if (isMongo) {
+      await connector.query(engineId, engineConfig, JSON.stringify({ drop: 'nonexistent_xyz' }));
+    } else {
+      await connector.query(engineId, engineConfig, 'DROP TABLE nonexistent_xyz');
+    }
+    assert(`${label} query rejects write`, false, 'should have thrown');
   } catch (e) {
-    assert(`${label} query rejects DROP`, e.message.includes('read-only'));
+    assert(`${label} query rejects write`, e.message.includes('read-only') || e.message.includes('allowed'));
   }
 
   // 9. getBlockingChains (no active blocks expected)

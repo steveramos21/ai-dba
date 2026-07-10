@@ -226,14 +226,28 @@ npm test            — run Vitest tests
 
 ---
 
+## Sprint 6 — MongoDB Connector (COMPLETED)
+
+### What was built:
+- `mongodb` driver (ESM-native, no type stubs needed)
+- All 7 connector methods: listDatabases, listTables (collections), describeTable (schema inference), listIndexes, listProcesses (currentOp), query (JSON command documents), getBlockingChains (long-running ops)
+- Docker MongoDB 7 container (port 12017, mongo:7 with auth)
+- `mongodb://` and `mongodb+srv://` URL scheme support in CLI + REPL
+- 4 new unit tests (`parseMongoUrl` — extraction, defaults, srv scheme, invalid)
+- 24 new integration tests against live MongoDB 7
+- `query()` accepts JSON command documents (find, aggregate, count, distinct, ping) with read-only guard
+
+### Sprint 6 Retro:
+- Integration testing caught 1 bug that mocked tests missed:
+  1. MongoDB `_id_` index doesn't set `unique: true` in `listIndexes()` result — fixed by checking `idx.name === "_id_"` as fallback for uniqueness
+- Known limitations: schema inference is sampled (100 docs), not authoritative; `currentOp` requires appropriate privileges; `query()` uses JSON command documents instead of SQL (documented API difference)
+- Test results: 39 unit + 121 integration = 160 tests, all passing
+
+---
+
 ## Planned Sprints
 
-### Sprint 6 — MongoDB Connector
-- `mongodb` driver
-- `db.currentOp()` for blocking/long-running ops
-- Docker MongoDB container
-
 ### Sprint 7 — Documentation Site
-- Docusaurus or MkDocs
+- MkDocs or Docusaurus
 - Getting started, CLI reference, MCP integration guide, connector docs
 - TSDoc/JSDoc for API reference generation

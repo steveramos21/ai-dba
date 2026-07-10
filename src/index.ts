@@ -57,6 +57,12 @@ function parseUrlToEngine(url: string): { id: string; config: EngineConfig; mask
     const id = `${u.hostname}-${u.pathname.slice(1) || "XE"}`;
     const masked = url.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@");
     return { id, config, maskedUrl: masked };
+  } else if (url.startsWith("mongodb://") || url.startsWith("mongodb+srv://")) {
+    const config: EngineConfig = { type: "mongodb", url };
+    const u = new URL(url);
+    const id = `${u.hostname}-${u.pathname.slice(1) || "admin"}`;
+    const masked = url.replace(/:\/\/([^:]+):([^@]+)@/, "://$1:***@");
+    return { id, config, maskedUrl: masked };
   }
   return null;
 }
@@ -252,7 +258,7 @@ program
             table.push([chalk.cyan(id), engine.type, "-", "-", "-", chalk.dim(engine.url)]);
           }
         } else {
-          table.push([chalk.cyan(id), engine.type, engine.host ?? "-", String(engine.port ?? (engine.type === "postgres" ? 5432 : engine.type === "sqlserver" ? 1433 : engine.type === "oracle" ? 1521 : 3306)), engine.database ?? "-", "-"]);
+          table.push([chalk.cyan(id), engine.type, engine.host ?? "-", String(engine.port ?? (engine.type === "postgres" ? 5432 : engine.type === "sqlserver" ? 1433 : engine.type === "oracle" ? 1521 : engine.type === "mongodb" ? 27017 : 3306)), engine.database ?? "-", "-"]);
         }
       }
       console.log(table.toString());
