@@ -24,6 +24,13 @@ function getConnectorForEngineById(engineId: string, config: EngineConfig, conne
   return connector;
 }
 
+// ─── Helper: probe DB reachability ────────────────────────────
+function probeQuery(type: string): string {
+  if (type === "oracle") return "SELECT 1 FROM DUAL";
+  if (type === "mongodb") return JSON.stringify({ ping: 1 });
+  return "SELECT 1";
+}
+
 // ─── Helper: parse URL into engine config ─────────────────────
 function parseUrlToEngine(url: string): { id: string; config: EngineConfig; maskedUrl: string } | null {
   if (url.startsWith("mysql://") || url.startsWith("mysql2://")) {
@@ -197,7 +204,7 @@ program
   .action(async (url: string) => {
     const result = parseUrlToEngine(url);
     if (!result) {
-      console.error(chalk.red("Unsupported URL scheme. Use mysql:// or postgresql://"));
+      console.error(chalk.red("Unsupported URL scheme. Use mysql://, postgresql://, sqlserver://, oracle://, or mongodb://"));
       process.exit(1);
     }
 
@@ -208,7 +215,7 @@ program
     // Verify connection
     const connector = getConnectorForEngineById(engineId, engineConfig, connectors);
     try {
-      await connector.query(engineId, engineConfig, "SELECT 1");
+      await connector.query(engineId, engineConfig, probeQuery(engineConfig.type));
       console.log(chalk.green(`Connected to ${chalk.bold(engineId)}`));
       console.log(chalk.dim(`  ${maskedUrl}`));
     } catch (err) {
@@ -478,11 +485,21 @@ async function startRepl(
 
         const result = parseUrlToEngine(url);
         if (!result) {
-          console.log(chalk.red("Unsupported URL scheme. Use mysql:// or postgresql://"));
+          console.log(chalk.red("Unsupported URL scheme. Use mysql://, postgresql://, sqlserver://, oracle://, or mongodb://"));
           return;
         }
 
         const { id, config: engineConfig, maskedUrl } = result;
+        // Verify reachability before claiming success
+        const probeConnector = connectors[engineConfig.type];
+        if (probeConnector) {
+          try {
+            await probeConnector.query(id, engineConfig, probeQuery(engineConfig.type));
+          } catch (err) {
+            console.log(chalk.red(`Connection failed: ${err instanceof Error ? err.message : String(err)}`));
+            return;
+          }
+        }
         config.engines[id] = engineConfig;
         currentEngine = id;
         console.log(chalk.green(`Connected to ${chalk.bold(id)}`));
