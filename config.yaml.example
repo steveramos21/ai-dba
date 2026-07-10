@@ -21,6 +21,10 @@ engines:
     type: postgres
     url: postgresql://postgres@127.0.0.1:15432/testdb
 
+  sqlserver-test:
+    type: sqlserver
+    url: sqlserver://sa:TestPassword123!@127.0.0.1:11433/testdb
+
   # PostgreSQL with SSL
   # postgres-prod:
   #   type: postgres

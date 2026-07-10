@@ -1,14 +1,16 @@
 // Integration test — exercises all connector methods against live Docker databases
-// Requires: docker compose up -d (MySQL 13306, PostgreSQL 15432)
+// Requires: docker compose up -d (MySQL 13306, PostgreSQL 15432, SQL Server 11433)
 import { mysqlConnector } from '../dist/connectors/mysql.js';
 import { postgresConnector } from '../dist/connectors/postgres.js';
+import { sqlserverConnector } from '../dist/connectors/sqlserver.js';
 
 const engines = {
   'mysql-test': { type: 'mysql', host: '127.0.0.1', port: 13306, user: 'root', password: 'testpassword', database: 'testdb' },
   'pg-test': { type: 'postgres', url: 'postgresql://postgres@127.0.0.1:15432/testdb' },
+  'sqlserver-test': { type: 'sqlserver', url: 'sqlserver://sa:TestPassword123!@127.0.0.1:11433/testdb' },
 };
 
-const connectors = { mysql: mysqlConnector, postgres: postgresConnector };
+const connectors = { mysql: mysqlConnector, postgres: postgresConnector, sqlserver: sqlserverConnector };
 
 let passed = 0, failed = 0;
 const results = [];
@@ -43,9 +45,12 @@ async function testEngine(engineId, engineConfig, connector) {
     if (engineConfig.type === 'mysql') {
       const tables = await connector.listTables(engineId, engineConfig, 'information_schema');
       assert(`${label} listTables(information_schema) has TABLES`, tables.some(t => t.name === 'TABLES'), `got: ${tables.map(t=>t.name).join(',')}`);
-    } else {
+    } else if (engineConfig.type === 'postgres') {
       const tables = await connector.listTables(engineId, engineConfig, 'public');
       assert(`${label} listTables(public) has blocking_test`, tables.some(t => t.name === 'blocking_test'), `got: ${tables.map(t=>t.name).join(',')}`);
+    } else if (engineConfig.type === 'sqlserver') {
+      const tables = await connector.listTables(engineId, engineConfig, 'dbo');
+      assert(`${label} listTables(dbo) has blocking_test`, tables.some(t => t.name === 'blocking_test'), `got: ${tables.map(t=>t.name).join(',')}`);
     }
   } catch (e) { assert(`${label} listTables(database override)`, false, e.message); }
 
