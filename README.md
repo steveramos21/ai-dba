@@ -14,6 +14,18 @@ Universal database copilot — diagnostics, operations, and performance analysis
 - **GitHub Actions CI** — build + test on Node 20/22, runs on every push/PR to main
 - **Documentation site** — MkDocs Material with 8 pages, light/dark mode, search
 
+## Documentation
+
+Full docs site live at: https://steveramos21.github.io/ai-dba/
+
+To build docs locally:
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-docs.txt
+.venv/bin/mkdocs serve
+# Open http://127.0.0.1:8000
+```
+
 ## Quick Start
 
 ### 1. Install dependencies
