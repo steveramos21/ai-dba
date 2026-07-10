@@ -7,9 +7,9 @@ Universal database copilot — diagnostics, operations, and performance analysis
 - **MCP Server** — expose database diagnostics as tools for AI agents (Hermes, Claude Code, etc.)
 - **CLI** — one-off commands for scripting and automation
 - **Interactive REPL** — explore your databases interactively with standard DBA commands
-- **Connection URLs** — connect via `mysql://`, `postgresql://`, `sqlserver://`, or `oracle://` URLs (no config file needed)
+- **Connection URLs** — connect via `mysql://`, `postgresql://`, `sqlserver://`, `oracle://`, or `mongodb://` URLs (no config file needed)
 - **Database-agnostic commands** — `databases`, `tables`, `describe`, `indexes`, `processes` work across engines
-- **Multi-engine support** — MySQL, PostgreSQL, SQL Server, and Oracle connectors, more engines coming
+- **Multi-engine support** — MySQL, PostgreSQL, SQL Server, Oracle, and MongoDB connectors
 - **MySQL blocking chains** — detect and report row-level blocking with full query details
 - **GitHub Actions CI** — build + test on Node 20/22, runs on every push/PR to main
 

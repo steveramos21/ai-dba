@@ -5,6 +5,7 @@ import { mysqlConnector } from "./connectors/mysql.js";
 import { postgresConnector } from "./connectors/postgres.js";
 import { sqlserverConnector } from "./connectors/sqlserver.js";
 import { oracleConnector } from "./connectors/oracle.js";
+import { mongodbConnector } from "./connectors/mongodb.js";
 import { registerBlockingChainsTool } from "./tools/blocking-chains.js";
 import { registerDatabasesTool } from "./tools/databases.js";
 import { registerTablesTool } from "./tools/tables.js";
@@ -21,6 +22,7 @@ export function buildConnectorMap(): Record<string, DatabaseConnector> {
     postgres: postgresConnector,
     sqlserver: sqlserverConnector,
     oracle: oracleConnector,
+    mongodb: mongodbConnector,
   };
 }
 

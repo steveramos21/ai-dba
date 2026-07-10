@@ -9,7 +9,7 @@ src/index.ts        — CLI entry (Commander); commands: serve, repl, connect, l
 src/server.ts       — McpServer setup; registers all MCP tools; handles graceful shutdown (SIGINT/SIGTERM → closeAllPools)
 src/config.ts       — Loads config.yaml via js-yaml; parseMysqlUrl() for MySQL URLs
 src/connector.ts    — DatabaseConnector interface + shared types (QueryResult, BlockingChain)
-src/connectors/     — Per-engine implementations: mysql.ts (mysql2/promise), postgres.ts (pg), sqlserver.ts (tedious), oracle.ts (oracledb)
+src/connectors/     — Per-engine implementations: mysql.ts (mysql2/promise), postgres.ts (pg), sqlserver.ts (tedious), oracle.ts (oracledb), mongodb.ts (mongodb)
 src/tools/          — MCP tool registrations; one file per tool, each calls a connector method
   blocking-chains.ts  — blocking chain diagnostics
   databases.ts        — list databases/schemas
@@ -25,7 +25,7 @@ src/tools/          — MCP tool registrations; one file per tool, each calls a 
 npm install          # Install dependencies
 npm run build        # tsc → dist/
 npm test             # vitest (unit tests, no config file needed)
-docker compose up -d # Spin up MySQL 13306 + PostgreSQL 15432 + SQL Server 11433 + Oracle 11521 for integration tests
+docker compose up -d # Spin up MySQL 13306 + PostgreSQL 15432 + SQL Server 11433 + Oracle 11521 + MongoDB 12017 for integration tests
 ```
 
 ## Critical ESM Convention
@@ -74,7 +74,7 @@ Engines are configured in `config.yaml` (copy from `config.yaml.example`):
 ```yaml
 engines:
   my-engine:
-    type: mysql | postgres | sqlserver | oracle  # required
+    type: mysql | postgres | sqlserver | oracle | mongodb  # required
     url: mysql://user:***@host:port/db  # preferred; password masked on display as :***@
 ```
 

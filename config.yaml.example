@@ -29,6 +29,10 @@ engines:
     type: oracle
     url: oracle://testuser:testpassword@127.0.0.1:11521/XEPDB1
 
+  mongodb-test:
+    type: mongodb
+    url: mongodb://testuser:testpassword@127.0.0.1:12017/testdb?authSource=admin
+
   # PostgreSQL with SSL
   # postgres-prod:
   #   type: postgres
