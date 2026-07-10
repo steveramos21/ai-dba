@@ -10,6 +10,8 @@ src/server.ts       — McpServer setup; registers all MCP tools; handles gracef
 src/config.ts       — Loads config.yaml via js-yaml; parseMysqlUrl() for MySQL URLs
 src/connector.ts    — DatabaseConnector interface + shared types (QueryResult, BlockingChain)
 src/connectors/     — Per-engine implementations: mysql.ts (mysql2/promise), postgres.ts (pg), sqlserver.ts (tedious), oracle.ts (oracledb), mongodb.ts (mongodb)
+docs/                 — MkDocs Material documentation site (8 pages)
+mkdocs.yml            — MkDocs config (run: .venv/bin/mkdocs serve)
 src/tools/          — MCP tool registrations; one file per tool, each calls a connector method
   blocking-chains.ts  — blocking chain diagnostics
   databases.ts        — list databases/schemas

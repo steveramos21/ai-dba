@@ -6,3 +6,5 @@ config.yaml
 *.pyc
 .claude/
 test/test-manual-all.*
+.venv/
+site/

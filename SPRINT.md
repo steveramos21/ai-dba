@@ -245,9 +245,18 @@ npm test            — run Vitest tests
 
 ---
 
-## Planned Sprints
+## Sprint 7 — Documentation Site (COMPLETED)
 
-### Sprint 7 — Documentation Site
-- MkDocs or Docusaurus
-- Getting started, CLI reference, MCP integration guide, connector docs
-- TSDoc/JSDoc for API reference generation
+### What was built:
+- MkDocs Material site with 8 pages: index, getting-started, connectors, cli, mcp, architecture, testing-guide, test-summary
+- Light/dark mode toggle, code copy buttons, search, tabbed navigation
+- `mkdocs.yml` config with nav, theme, markdown extensions
+- `docs/TESTING.md` renamed to `docs/testing-guide.md` (MkDocs case sensitivity)
+- `docs/index.html` removed (conflicted with `index.md`)
+- `.venv/` and `site/` added to `.gitignore`
+- Build passes `--strict` (0 warnings, 0 errors)
+
+### Sprint 7 Retro:
+- MkDocs Material 9.7.6 on Python 3.12 (venv at `.venv/`)
+- 3 anchor link mismatches in testing-guide.md (em-dash vs hyphen) — fixed
+- Material for MkDocs deprecation warning (MkDocs 2.0 future notice) — informational only, not a blocker

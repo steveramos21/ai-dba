@@ -9,9 +9,9 @@ This guide covers manual testing procedures for all sprints. Each section reflec
 | 1 | Blocking chains (MySQL) | MERGED | [Sprints 1-3 Tests](#sprints-1-3-merged) |
 | 2 | PostgreSQL connector | MERGED | [Sprints 1-3 Tests](#sprints-1-3-merged) |
 | 3 | MCP DBA tools + CI | MERGED | [Sprints 1-3 Tests](#sprints-1-3-merged) |
-| 4 | SQL Server connector | MERGED | [Sprint 4 — SQL Server](#sprint-4--sql-server) |
-| 5 | Oracle connector | MERGED | [Sprint 5 — Oracle](#sprint-5--oracle) |
-| 6 | MongoDB connector | MERGED | [Sprint 6 — MongoDB](#sprint-6--mongodb) |
+| 4 | SQL Server connector | MERGED | [Sprint 4 - SQL Server](#sprint-4-sql-server) |
+| 5 | Oracle connector | MERGED | [Sprint 5 - Oracle](#sprint-5-oracle) |
+| 6 | MongoDB connector | MERGED | [Sprint 6 - MongoDB](#sprint-6-mongodb) |
 
 **Test totals:** 39 unit tests + 121 integration tests = 160 tests, all passing.
 
@@ -113,7 +113,7 @@ echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | timeout 5 node dist/inde
 
 ---
 
-## Sprint 4 — SQL Server
+## Sprint 4 - SQL Server
 
 **Status:** MERGED (PR #11)
 **Driver:** `tedious` (raw driver, promise-based wrapper)
@@ -268,7 +268,7 @@ echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"databases","argum
 
 ---
 
-## Sprint 5 — Oracle
+## Sprint 5 - Oracle
 
 **Status:** MERGED (PR #12)
 **Driver:** `oracledb` (thin mode — no Oracle Instant Client needed)
@@ -421,7 +421,7 @@ node dist/index.js --config config.yaml blocking-chains oracle-test --json
 
 ---
 
-## Sprint 6 — MongoDB
+## Sprint 6 - MongoDB
 
 **Status:** MERGED (PR #13)
 **Driver:** `mongodb` (official Node.js driver, ESM-native)
