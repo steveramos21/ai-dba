@@ -12,6 +12,7 @@ Universal database copilot — diagnostics, operations, and performance analysis
 - **Multi-engine support** — MySQL, PostgreSQL, SQL Server, Oracle, and MongoDB connectors
 - **MySQL blocking chains** — detect and report row-level blocking with full query details
 - **GitHub Actions CI** — build + test on Node 20/22, runs on every push/PR to main
+- **Documentation site** — MkDocs Material with 8 pages, light/dark mode, search
 
 ## Quick Start
 

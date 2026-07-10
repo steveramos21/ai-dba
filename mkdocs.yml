@@ -1,0 +1,49 @@
+site_name: AI-DBA
+site_description: Universal database copilot — diagnostics, operations, and performance analysis via MCP and CLI.
+site_url: https://steveramos21.github.io/ai-dba/
+repo_url: https://github.com/steveramos21/ai-dba
+repo_name: steveramos21/ai-dba
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Connectors: connectors.md
+  - CLI & REPL: cli.md
+  - MCP Server: mcp.md
+  - Architecture: architecture.md
+  - Testing Guide: testing-guide.md
+  - Test Coverage: test-summary.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - tables
