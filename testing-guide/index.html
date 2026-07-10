@@ -1,0 +1,2138 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Universal database copilot — diagnostics, operations, and performance analysis via MCP and CLI.">
+      
+      
+      
+        <link rel="canonical" href="https://steveramos21.github.io/ai-dba/testing-guide/">
+      
+      
+        <link rel="prev" href="../architecture/">
+      
+      
+        <link rel="next" href="../test-summary/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Testing Guide - AI-DBA</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ai-dba-manual-testing-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="AI-DBA" class="md-header__button md-logo" aria-label="AI-DBA" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            AI-DBA
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Testing Guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/steveramos21/ai-dba" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    steveramos21/ai-dba
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../connectors/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Connectors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../cli/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI & REPL
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../mcp/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  MCP Server
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../architecture/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Testing Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../test-summary/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Test Coverage
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="AI-DBA" class="md-nav__button md-logo" aria-label="AI-DBA" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    AI-DBA
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/steveramos21/ai-dba" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    steveramos21/ai-dba
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../connectors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connectors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI & REPL
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Server
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing Guide
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites-all-sprints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites (all sprints)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sprints-1-3-merged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sprints 1-3 (MERGED)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sprints 1-3 (MERGED)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-unit-tests-no-docker-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Unit Tests (no Docker needed)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-integration-tests-docker-required" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Integration Tests (Docker required)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-cli-smoke-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. CLI Smoke Tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-repl-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. REPL Smoke Test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-mcp-server-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. MCP Server Smoke Test
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sprint-4-sql-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sprint 4 - SQL Server
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sprint 4 - SQL Server">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docker-setup-in-docker-composeyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Setup (in docker-compose.yml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-in-configyamlexample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config (in config.yaml.example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-test-procedure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Test Procedure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sprint-5-oracle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sprint 5 - Oracle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sprint 5 - Oracle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docker-setup-in-docker-composeyml_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Setup (in docker-compose.yml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-in-configyamlexample_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config (in config.yaml.example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-test-procedure_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Test Procedure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-issues_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sprint-6-mongodb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sprint 6 - MongoDB
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sprint 6 - MongoDB">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docker-setup-in-docker-composeyml_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Setup (in docker-compose.yml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-in-configyamlexample_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config (in config.yaml.example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-test-procedure_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Test Procedure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-issues_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#master-test-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Master Test Checklist
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Master Test Checklist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pre-flight" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pre-flight
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-engine-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-engine verification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blocking-scenario-per-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Blocking scenario per engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integration-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP server
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-summary/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test Coverage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Reference
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites-all-sprints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites (all sprints)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sprints-1-3-merged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sprints 1-3 (MERGED)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sprints 1-3 (MERGED)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-unit-tests-no-docker-needed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Unit Tests (no Docker needed)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-integration-tests-docker-required" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Integration Tests (Docker required)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-cli-smoke-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. CLI Smoke Tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-repl-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. REPL Smoke Test
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-mcp-server-smoke-test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. MCP Server Smoke Test
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sprint-4-sql-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sprint 4 - SQL Server
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sprint 4 - SQL Server">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docker-setup-in-docker-composeyml" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Setup (in docker-compose.yml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-in-configyamlexample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config (in config.yaml.example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-test-procedure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Test Procedure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sprint-5-oracle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sprint 5 - Oracle
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sprint 5 - Oracle">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docker-setup-in-docker-composeyml_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Setup (in docker-compose.yml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-in-configyamlexample_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config (in config.yaml.example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-test-procedure_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Test Procedure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-issues_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sprint-6-mongodb" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sprint 6 - MongoDB
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Sprint 6 - MongoDB">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#docker-setup-in-docker-composeyml_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Setup (in docker-compose.yml)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#config-in-configyamlexample_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Config (in config.yaml.example)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#manual-test-procedure_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Manual Test Procedure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#known-issues_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#troubleshooting_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#master-test-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Master Test Checklist
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Master Test Checklist">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pre-flight" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pre-flight
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#per-engine-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Per-engine verification
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#blocking-scenario-per-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Blocking scenario per engine
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#integration-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP server
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="ai-dba-manual-testing-guide">AI-DBA Manual Testing Guide</h1>
+<p>This guide covers manual testing procedures for all sprints. Each section reflects the actual merged state of the codebase.</p>
+<h2 id="quick-reference">Quick Reference</h2>
+<table>
+<thead>
+<tr>
+<th>Sprint</th>
+<th>Scope</th>
+<th>Status</th>
+<th>Test Doc</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Blocking chains (MySQL)</td>
+<td>MERGED</td>
+<td><a href="#sprints-1-3-merged">Sprints 1-3 Tests</a></td>
+</tr>
+<tr>
+<td>2</td>
+<td>PostgreSQL connector</td>
+<td>MERGED</td>
+<td><a href="#sprints-1-3-merged">Sprints 1-3 Tests</a></td>
+</tr>
+<tr>
+<td>3</td>
+<td>MCP DBA tools + CI</td>
+<td>MERGED</td>
+<td><a href="#sprints-1-3-merged">Sprints 1-3 Tests</a></td>
+</tr>
+<tr>
+<td>4</td>
+<td>SQL Server connector</td>
+<td>MERGED</td>
+<td><a href="#sprint-4-sql-server">Sprint 4 - SQL Server</a></td>
+</tr>
+<tr>
+<td>5</td>
+<td>Oracle connector</td>
+<td>MERGED</td>
+<td><a href="#sprint-5-oracle">Sprint 5 - Oracle</a></td>
+</tr>
+<tr>
+<td>6</td>
+<td>MongoDB connector</td>
+<td>MERGED</td>
+<td><a href="#sprint-6-mongodb">Sprint 6 - MongoDB</a></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Test totals:</strong> 39 unit tests + 121 integration tests = 160 tests, all passing.</p>
+<h2 id="prerequisites-all-sprints">Prerequisites (all sprints)</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nb">cd</span><span class="w"> </span>/mnt/d/ai-dba
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>npm<span class="w"> </span>install
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>npm<span class="w"> </span>run<span class="w"> </span>build
+</code></pre></div>
+<p>Docker must be running. Verify:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>info<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-3
+</code></pre></div></p>
+<hr />
+<h2 id="sprints-1-3-merged">Sprints 1-3 (MERGED)</h2>
+<h3 id="1-unit-tests-no-docker-needed">1. Unit Tests (no Docker needed)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>npm<span class="w"> </span><span class="nb">test</span>
+</code></pre></div>
+<p><strong>Expected:</strong> 10 test files, 39 tests, all passing. Duration ~20s.</p>
+<h3 id="2-integration-tests-docker-required">2. Integration Tests (Docker required)</h3>
+<p>Start containers:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="c1"># Wait for all containers to be healthy</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="o">=</span><span class="s1">&#39;{{.State.Health.Status}}&#39;</span><span class="w"> </span>ai-dba-mysql-test
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="o">=</span><span class="s1">&#39;{{.State.Health.Status}}&#39;</span><span class="w"> </span>ai-dba-postgres-test
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># Both must show &quot;healthy&quot;</span>
+</code></pre></div></p>
+<p>Seed test data:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># MySQL</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ai-dba-mysql-test<span class="w"> </span>mysql<span class="w"> </span>-uroot<span class="w"> </span>-ptestpassword<span class="w"> </span>testdb<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span>-e<span class="w"> </span><span class="s2">&quot;CREATE TABLE IF NOT EXISTS blocking_test (id INT PRIMARY KEY AUTO_INCREMENT, name VARCHAR(100), value INT); INSERT IGNORE INTO blocking_test (name, value) VALUES (&#39;alpha&#39;,1),(&#39;beta&#39;,2),(&#39;gamma&#39;,3);&quot;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># PostgreSQL</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ai-dba-postgres-test<span class="w"> </span>psql<span class="w"> </span>-U<span class="w"> </span>postgres<span class="w"> </span>-d<span class="w"> </span>testdb<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span>-c<span class="w"> </span><span class="s2">&quot;CREATE TABLE IF NOT EXISTS blocking_test (id SERIAL PRIMARY KEY, value INT); INSERT INTO blocking_test (value) VALUES (1) ON CONFLICT DO NOTHING;&quot;</span>
+</code></pre></div></p>
+<p>Run integration tests:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>node<span class="w"> </span>test/integration-all.mjs
+</code></pre></div>
+<strong>Expected:</strong> 121 tests, 0 failures. Tests all connector methods (listDatabases, listTables, describeTable, listIndexes, listProcesses, query, getBlockingChains) against all 5 live databases.</p>
+<h3 id="3-cli-smoke-tests">3. CLI Smoke Tests</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Version</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--version
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># Expected: 1.0.0</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="c1"># List engines (uses config.yaml.example)</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml.example<span class="w"> </span>list-engines
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># Expected: Table with all 5 engines, URLs properly masked</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="c1"># Blocking chains (no active blocks)</span>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>blocking-chains<span class="w"> </span>mysql-test
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="c1"># Expected: &quot;No blocking chains found on mysql-test&quot;</span>
+</code></pre></div>
+<h3 id="4-repl-smoke-test">4. REPL Smoke Test</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>repl
+</code></pre></div>
+<p>Type these commands and verify output:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>help              — shows command list
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>engines           — table with all engines, * on current
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>use postgres-test  — &quot;Switched to postgres-test&quot;
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>databases         — table with testdb, postgres, etc.
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>tables            — table with blocking_test
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>describe blocking_test — columns: id (PRI, auto_increment), value
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>indexes blocking_test  — PRIMARY index on id
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>processes         — list of active connections
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>blocking-chains   — &quot;No blocking chains.&quot;
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>quit              — &quot;Bye.&quot;
+</code></pre></div></p>
+<h3 id="5-mcp-server-smoke-test">5. MCP Server Smoke Test</h3>
+<p><div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;method&quot;:&quot;tools/list&quot;,&quot;id&quot;:1}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>timeout<span class="w"> </span><span class="m">5</span><span class="w"> </span>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>serve<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+</code></pre></div>
+<strong>Expected:</strong> JSON response listing 6 tools: blocking-chains, databases, tables, describe-table, indexes, processes.</p>
+<hr />
+<h2 id="sprint-4-sql-server">Sprint 4 - SQL Server</h2>
+<p><strong>Status:</strong> MERGED (PR #11)
+<strong>Driver:</strong> <code>tedious</code> (raw driver, promise-based wrapper)
+<strong>Docker image:</strong> <code>mcr.microsoft.com/mssql/server:2022-latest</code>
+<strong>Port:</strong> 11433 (host) → 1433 (container)</p>
+<h3 id="prerequisites">Prerequisites</h3>
+<ul>
+<li>Docker with 2+ GB RAM available for SQL Server container</li>
+<li><code>npm install</code> includes <code>tedious</code> (already in package.json)</li>
+</ul>
+<h3 id="docker-setup-in-docker-composeyml">Docker Setup (in docker-compose.yml)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="w">  </span><span class="nt">sqlserver-test</span><span class="p">:</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mcr.microsoft.com/mssql/server:2022-latest</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">container_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ai-dba-sqlserver-test</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">restart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unless-stopped</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">    </span><span class="nt">ports</span><span class="p">:</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;11433:1433&quot;</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="w">      </span><span class="nt">ACCEPT_EULA</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Y&quot;</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="w">      </span><span class="nt">MSSQL_SA_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;TestPassword123!&quot;</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="w">      </span><span class="nt">MSSQL_PID</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Express&quot;</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="w">    </span><span class="nt">healthcheck</span><span class="p">:</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="w">      </span><span class="nt">test</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;CMD-SHELL&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;/opt/mssql-tools18/bin/sqlcmd</span><span class="nv"> </span><span class="s">-S</span><span class="nv"> </span><span class="s">localhost</span><span class="nv"> </span><span class="s">-U</span><span class="nv"> </span><span class="s">sa</span><span class="nv"> </span><span class="s">-P</span><span class="nv"> </span><span class="s">&#39;TestPassword123!&#39;</span><span class="nv"> </span><span class="s">-C</span><span class="nv"> </span><span class="s">-Q</span><span class="nv"> </span><span class="s">&#39;SELECT</span><span class="nv"> </span><span class="s">1&#39;</span><span class="nv"> </span><span class="s">||</span><span class="nv"> </span><span class="s">/opt/mssql-tools/bin/sqlcmd</span><span class="nv"> </span><span class="s">-S</span><span class="nv"> </span><span class="s">localhost</span><span class="nv"> </span><span class="s">-U</span><span class="nv"> </span><span class="s">sa</span><span class="nv"> </span><span class="s">-P</span><span class="nv"> </span><span class="s">&#39;TestPassword123!&#39;</span><span class="nv"> </span><span class="s">-Q</span><span class="nv"> </span><span class="s">&#39;SELECT</span><span class="nv"> </span><span class="s">1&#39;&quot;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="w">      </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10s</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="w">      </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5s</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="w">      </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+</code></pre></div>
+<h3 id="config-in-configyamlexample">Config (in config.yaml.example)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="w">  </span><span class="nt">sqlserver-test</span><span class="p">:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sqlserver</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sqlserver://sa:TestPassword123!@127.0.0.1:11433/testdb</span>
+</code></pre></div>
+<h3 id="manual-test-procedure">Manual Test Procedure</h3>
+<p><strong>Step 1: Start container</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>sqlserver-test
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="o">=</span><span class="s1">&#39;{{.State.Health.Status}}&#39;</span><span class="w"> </span>ai-dba-sqlserver-test
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="c1"># Wait for &quot;healthy&quot; — SQL Server takes 20-30s to initialize</span>
+</code></pre></div></p>
+<p><strong>Step 2: Create test database and table</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ai-dba-sqlserver-test<span class="w"> </span>/opt/mssql-tools18/bin/sqlcmd<span class="w"> </span>-S<span class="w"> </span>localhost<span class="w"> </span>-U<span class="w"> </span>sa<span class="w"> </span>-P<span class="w"> </span><span class="s1">&#39;TestPassword123!&#39;</span><span class="w"> </span>-C<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="w">  </span>-Q<span class="w"> </span><span class="s2">&quot;IF DB_ID(&#39;testdb&#39;) IS NULL CREATE DATABASE testdb&quot;</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ai-dba-sqlserver-test<span class="w"> </span>/opt/mssql-tools18/bin/sqlcmd<span class="w"> </span>-S<span class="w"> </span>localhost<span class="w"> </span>-U<span class="w"> </span>sa<span class="w"> </span>-P<span class="w"> </span><span class="s1">&#39;TestPassword123!&#39;</span><span class="w"> </span>-C<span class="w"> </span>-d<span class="w"> </span>testdb<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="w">  </span>-Q<span class="w"> </span><span class="s2">&quot;IF OBJECT_ID(&#39;blocking_test&#39;,&#39;U&#39;) IS NULL CREATE TABLE blocking_test (id INT IDENTITY(1,1) PRIMARY KEY, name NVARCHAR(100), value INT); IF NOT EXISTS (SELECT 1 FROM blocking_test) INSERT INTO blocking_test (name, value) VALUES (&#39;alpha&#39;,1),(&#39;beta&#39;,2),(&#39;gamma&#39;,3);&quot;</span>
+</code></pre></div></p>
+<p><strong>Step 3: Run unit tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>npm<span class="w"> </span><span class="nb">test</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="c1"># Expected: 10 test files, 39 tests (includes 4 SQL Server URL parser tests)</span>
+</code></pre></div></p>
+<p><strong>Step 4: Run integration tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>node<span class="w"> </span>test/integration-all.mjs
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="c1"># Expected: 121 tests total, 0 failures (includes 24 SQL Server tests)</span>
+</code></pre></div></p>
+<p><strong>Step 5: CLI tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>list-engines
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="c1"># Expected: 5 engines including sqlserver-test</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>blocking-chains<span class="w"> </span>sqlserver-test
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="c1"># Expected: &quot;No blocking chains found on sqlserver-test&quot;</span>
+</code></pre></div></p>
+<p><strong>Step 6: REPL tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>repl
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="c1"># Type:</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>use<span class="w"> </span>sqlserver-test
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>databases<span class="w">         </span>—<span class="w"> </span>should<span class="w"> </span>list<span class="w"> </span>testdb,<span class="w"> </span>master,<span class="w"> </span>tempdb,<span class="w"> </span>model,<span class="w"> </span>msdb
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>tables<span class="w">            </span>—<span class="w"> </span>should<span class="w"> </span>list<span class="w"> </span>blocking_test
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>describe<span class="w"> </span>blocking_test<span class="w"> </span>—<span class="w"> </span>columns:<span class="w"> </span>id<span class="w"> </span><span class="o">(</span>int,<span class="w"> </span>PRI,<span class="w"> </span>IDENTITY<span class="o">)</span>,<span class="w"> </span>name<span class="w"> </span><span class="o">(</span>nvarchar<span class="o">)</span>,<span class="w"> </span>value<span class="w"> </span><span class="o">(</span>int<span class="o">)</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>indexes<span class="w"> </span>blocking_test<span class="w">  </span>—<span class="w"> </span>PRIMARY<span class="w"> </span>key<span class="w"> </span>index<span class="w"> </span>on<span class="w"> </span>id<span class="w"> </span><span class="o">(</span>CLUSTERED,<span class="w"> </span>UNIQUE<span class="o">)</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>processes<span class="w">         </span>—<span class="w"> </span>active<span class="w"> </span>user<span class="w"> </span>connections<span class="w"> </span><span class="o">(</span>system<span class="w"> </span>processes<span class="w"> </span>filtered<span class="w"> </span>out<span class="o">)</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>blocking-chains<span class="w">   </span>—<span class="w"> </span>no<span class="w"> </span>chains
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>sql<span class="w"> </span>SELECT<span class="w"> </span>@@VERSION<span class="w"> </span>—<span class="w"> </span>should<span class="w"> </span><span class="k">return</span><span class="w"> </span>SQL<span class="w"> </span>Server<span class="w"> </span><span class="m">2022</span><span class="w"> </span>version<span class="w"> </span>string
+</code></pre></div></p>
+<p><strong>Step 7: Blocking scenario test</strong></p>
+<p>Open two SQL Server sessions:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Session 1 — hold lock</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-i<span class="w"> </span>ai-dba-sqlserver-test<span class="w"> </span>/opt/mssql-tools18/bin/sqlcmd<span class="w"> </span>-S<span class="w"> </span>localhost<span class="w"> </span>-U<span class="w"> </span>sa<span class="w"> </span>-P<span class="w"> </span><span class="s1">&#39;TestPassword123!&#39;</span><span class="w"> </span>-C<span class="w"> </span>-d<span class="w"> </span>testdb<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="w">  </span>-Q<span class="w"> </span><span class="s2">&quot;BEGIN TRAN; UPDATE blocking_test SET value=999 WHERE id=1; WAITFOR DELAY &#39;00:00:15&#39;; ROLLBACK TRAN;&quot;</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="c1"># Session 2 (in another terminal, immediately) — blocked</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-i<span class="w"> </span>ai-dba-sqlserver-test<span class="w"> </span>/opt/mssql-tools18/bin/sqlcmd<span class="w"> </span>-S<span class="w"> </span>localhost<span class="w"> </span>-U<span class="w"> </span>sa<span class="w"> </span>-P<span class="w"> </span><span class="s1">&#39;TestPassword123!&#39;</span><span class="w"> </span>-C<span class="w"> </span>-d<span class="w"> </span>testdb<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="w">  </span>-Q<span class="w"> </span><span class="s2">&quot;UPDATE blocking_test SET value=888 WHERE id=1;&quot;</span>
+</code></pre></div></p>
+<p>While both sessions are active, run:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>blocking-chains<span class="w"> </span>sqlserver-test<span class="w"> </span>--json
+</code></pre></div></p>
+<p><strong>Expected JSON:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="p">{</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">&quot;chains&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">    </span><span class="nt">&quot;engine_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sqlserver-test&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">    </span><span class="nt">&quot;blocking_pid&quot;</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;</span><span class="kc">nu</span><span class="err">mber&gt;</span><span class="p">,</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">    </span><span class="nt">&quot;blocked_pid&quot;</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;</span><span class="kc">nu</span><span class="err">mber&gt;</span><span class="p">,</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">    </span><span class="nt">&quot;wait_duration_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;posi</span><span class="kc">t</span><span class="err">ive</span><span class="w"> </span><span class="kc">nu</span><span class="err">mber&gt;</span><span class="p">,</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">    </span><span class="nt">&quot;wait_event&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;LCK_M_X&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="w">    </span><span class="nt">&quot;blocking_query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;UPDATE blocking_test SET value=999 WHERE id=1&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="w">    </span><span class="nt">&quot;blocked_query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;UPDATE blocking_test SET value=888 WHERE id=1&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="w">    </span><span class="nt">&quot;database_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;testdb&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="w">    </span><span class="nt">&quot;wait_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;LCK&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-12" name="__codelineno-20-12" href="#__codelineno-20-12"></a><span class="w">    </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;suspended&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-13" name="__codelineno-20-13" href="#__codelineno-20-13"></a><span class="w">    </span><span class="nt">&quot;host_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;hostname&gt;&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-14" name="__codelineno-20-14" href="#__codelineno-20-14"></a><span class="w">    </span><span class="nt">&quot;program_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sqlcmd&quot;</span><span class="p">,</span>
+<a id="__codelineno-20-15" name="__codelineno-20-15" href="#__codelineno-20-15"></a><span class="w">    </span><span class="nt">&quot;login_time&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-20-16" name="__codelineno-20-16" href="#__codelineno-20-16"></a><span class="w">  </span><span class="p">}],</span>
+<a id="__codelineno-20-17" name="__codelineno-20-17" href="#__codelineno-20-17"></a><span class="w">  </span><span class="nt">&quot;count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<a id="__codelineno-20-18" name="__codelineno-20-18" href="#__codelineno-20-18"></a><span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Step 8: MCP tool test</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;method&quot;:&quot;tools/call&quot;,&quot;params&quot;:{&quot;name&quot;:&quot;databases&quot;,&quot;arguments&quot;:{&quot;engineId&quot;:&quot;sqlserver-test&quot;}},&quot;id&quot;:2}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>timeout<span class="w"> </span><span class="m">5</span><span class="w"> </span>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>serve<span class="w"> </span><span class="m">2</span>&gt;/dev/null
+</code></pre></div>
+<strong>Expected:</strong> JSON with databases array containing testdb, master, tempdb, model, msdb.</p>
+<h3 id="known-issues">Known Issues</h3>
+<ul>
+<li><strong>No connection pooling:</strong> Each connector method creates a new TCP connection. This is a known limitation — the <code>TediousConnection</code> wrapper opens/closes per call.</li>
+<li><strong>tedious type definitions:</strong> The <code>.d.ts</code> for tedious doesn't expose <code>columnMetadata</code>/<code>row</code> as typed events. The connector casts through <code>any</code> to subscribe.</li>
+<li><strong>System processes filtered:</strong> <code>listProcesses</code> filters to <code>session_id &gt;= 50 AND is_user_process = 1</code> to exclude system sessions.</li>
+<li><strong>sqlcmd path:</strong> SQL Server 2022 uses <code>/opt/mssql-tools18/bin/sqlcmd</code> (with <code>-C</code> flag for trust cert). Older images use <code>/opt/mssql-tools/bin/sqlcmd</code> (no <code>-C</code> flag). The healthcheck tries both.</li>
+</ul>
+<h3 id="troubleshooting">Troubleshooting</h3>
+<ul>
+<li><strong>Container won't start:</strong> SQL Server needs 2+ GB RAM. Check <code>docker stats</code>. On WSL, ensure WSL2 memory limit is high enough.</li>
+<li><strong>SA_PASSWORD complexity:</strong> SQL Server requires mixed case + numbers + symbols. "TestPassword123!" meets requirements.</li>
+<li><strong>Health check slow:</strong> SQL Server takes 20-30s to initialize. The health check has <code>retries: 10</code> to handle this.</li>
+<li><strong>ECONNREFUSED:</strong> Wait for healthy status before running tests.</li>
+</ul>
+<hr />
+<h2 id="sprint-5-oracle">Sprint 5 - Oracle</h2>
+<p><strong>Status:</strong> MERGED (PR #12)
+<strong>Driver:</strong> <code>oracledb</code> (thin mode — no Oracle Instant Client needed)
+<strong>Docker image:</strong> <code>gvenzl/oracle-xe:21-slim</code>
+<strong>Port:</strong> 11521 (host) → 1521 (container)</p>
+<h3 id="prerequisites_1">Prerequisites</h3>
+<ul>
+<li>Docker with 2+ GB RAM for Oracle XE</li>
+<li><code>npm install</code> includes <code>oracledb</code> (already in package.json)</li>
+<li>Oracle XE license: free for development/education</li>
+</ul>
+<h3 id="docker-setup-in-docker-composeyml_1">Docker Setup (in docker-compose.yml)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="w">  </span><span class="nt">oracle-test</span><span class="p">:</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gvenzl/oracle-xe:21-slim</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">    </span><span class="nt">container_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ai-dba-oracle-test</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">    </span><span class="nt">restart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unless-stopped</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="w">    </span><span class="nt">ports</span><span class="p">:</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;11521:1521&quot;</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="w">      </span><span class="nt">ORACLE_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">testpassword</span>
+<a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="w">      </span><span class="nt">APP_USER</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">testuser</span>
+<a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="w">      </span><span class="nt">APP_USER_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">testpassword</span>
+<a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="w">    </span><span class="nt">healthcheck</span><span class="p">:</span>
+<a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="w">      </span><span class="nt">test</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;CMD-SHELL&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;echo</span><span class="nv"> </span><span class="s">&#39;SELECT</span><span class="nv"> </span><span class="s">1</span><span class="nv"> </span><span class="s">FROM</span><span class="nv"> </span><span class="s">DUAL;&#39;</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">sqlplus</span><span class="nv"> </span><span class="s">-s</span><span class="nv"> </span><span class="s">testuser/testpassword@localhost:1521/XEPDB1</span><span class="nv"> </span><span class="s">2&gt;/dev/null</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">grep</span><span class="nv"> </span><span class="s">-q</span><span class="nv"> </span><span class="s">&#39;1&#39;&quot;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="w">      </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">15s</span>
+<a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="w">      </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10s</span>
+<a id="__codelineno-22-15" name="__codelineno-22-15" href="#__codelineno-22-15"></a><span class="w">      </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10</span>
+</code></pre></div>
+<h3 id="config-in-configyamlexample_1">Config (in config.yaml.example)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="w">  </span><span class="nt">oracle-test</span><span class="p">:</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">oracle</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">oracle://testuser:testpassword@127.0.0.1:11521/XEPDB1</span>
+</code></pre></div>
+<h3 id="manual-test-procedure_1">Manual Test Procedure</h3>
+<p><strong>Step 1: Start container</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>oracle-test
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="o">=</span><span class="s1">&#39;{{.State.Health.Status}}&#39;</span><span class="w"> </span>ai-dba-oracle-test
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="c1"># Wait for &quot;healthy&quot; — Oracle XE takes 30-60s to initialize</span>
+</code></pre></div></p>
+<p><strong>Step 2: Create test table</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ai-dba-oracle-test<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;echo &#39;CREATE TABLE blocking_test (id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR2(100), value NUMBER); INSERT INTO blocking_test (name, value) VALUES (&#39;\&#39;&#39;alpha&#39;\&#39;&#39;,1), (&#39;\&#39;&#39;beta&#39;\&#39;&#39;,2), (&#39;\&#39;&#39;gamma&#39;\&#39;&#39;,3); COMMIT;&#39; | sqlplus -s testuser/testpassword@localhost:1521/XEPDB1&quot;</span>
+</code></pre></div></p>
+<p><strong>Step 3: Run unit tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>npm<span class="w"> </span><span class="nb">test</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="c1"># Expected: 10 test files, 39 tests (includes 4 Oracle URL parser tests)</span>
+</code></pre></div></p>
+<p><strong>Step 4: Run integration tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>node<span class="w"> </span>test/integration-all.mjs
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="c1"># Expected: 121 tests total, 0 failures (includes 24 Oracle tests)</span>
+</code></pre></div></p>
+<p><strong>Step 5: CLI tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>list-engines
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="c1"># Expected: 5 engines including oracle-test</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>blocking-chains<span class="w"> </span>oracle-test
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="c1"># Expected: &quot;No blocking chains found on oracle-test&quot;</span>
+</code></pre></div></p>
+<p><strong>Step 6: REPL tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>repl
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a>use<span class="w"> </span>oracle-test
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a>databases<span class="w">         </span>—<span class="w"> </span>should<span class="w"> </span>list<span class="w"> </span>schemas/users<span class="w"> </span><span class="o">(</span>TESTUSER,<span class="w"> </span>SYS,<span class="w"> </span>SYSTEM,<span class="w"> </span>etc.<span class="o">)</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a>tables<span class="w">            </span>—<span class="w"> </span>should<span class="w"> </span>list<span class="w"> </span>BLOCKING_TEST
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a>describe<span class="w"> </span>BLOCKING_TEST<span class="w"> </span>—<span class="w"> </span>columns:<span class="w"> </span>ID<span class="w"> </span><span class="o">(</span>NUMBER,<span class="w"> </span>PRI,<span class="w"> </span>IDENTITY<span class="o">)</span>,<span class="w"> </span>NAME<span class="w"> </span><span class="o">(</span>VARCHAR2<span class="o">)</span>,<span class="w"> </span>VALUE<span class="w"> </span><span class="o">(</span>NUMBER<span class="o">)</span>
+<a id="__codelineno-29-6" name="__codelineno-29-6" href="#__codelineno-29-6"></a>indexes<span class="w"> </span>BLOCKING_TEST<span class="w">  </span>—<span class="w"> </span>SYS_C*<span class="w"> </span>primary<span class="w"> </span>key<span class="w"> </span>index
+<a id="__codelineno-29-7" name="__codelineno-29-7" href="#__codelineno-29-7"></a>processes<span class="w">         </span>—<span class="w"> </span>active<span class="w"> </span>sessions<span class="w"> </span><span class="o">(</span>empty<span class="w"> </span><span class="k">if</span><span class="w"> </span>no<span class="w"> </span>SELECT<span class="w"> </span>ANY<span class="w"> </span>DICTIONARY<span class="w"> </span>privilege<span class="o">)</span>
+<a id="__codelineno-29-8" name="__codelineno-29-8" href="#__codelineno-29-8"></a>blocking-chains<span class="w">   </span>—<span class="w"> </span>no<span class="w"> </span>chains<span class="w"> </span><span class="o">(</span>empty<span class="w"> </span><span class="k">if</span><span class="w"> </span>no<span class="w"> </span>SELECT<span class="w"> </span>ANY<span class="w"> </span>DICTIONARY<span class="w"> </span>privilege<span class="o">)</span>
+<a id="__codelineno-29-9" name="__codelineno-29-9" href="#__codelineno-29-9"></a>sql<span class="w"> </span>SELECT<span class="w"> </span>*<span class="w"> </span>FROM<span class="w"> </span>v<span class="nv">$version</span><span class="w"> </span>—<span class="w"> </span>should<span class="w"> </span><span class="k">return</span><span class="w"> </span>Oracle<span class="w"> </span>21c<span class="w"> </span>version<span class="w"> </span><span class="o">(</span>requires<span class="w"> </span>SELECT<span class="w"> </span>ANY<span class="w"> </span>DICTIONARY<span class="o">)</span>
+</code></pre></div></p>
+<p><strong>Step 7: Blocking scenario test</strong></p>
+<p>Requires SELECT ANY DICTIONARY privilege for the testuser:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ai-dba-oracle-test<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;echo &#39;GRANT SELECT ANY DICTIONARY TO testuser;&#39; | sqlplus -s / as sysdba&quot;</span>
+</code></pre></div></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="c1"># Session 1 — hold lock</span>
+<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-i<span class="w"> </span>ai-dba-oracle-test<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;echo &#39;SET AUTOCOMMIT OFF</span>
+<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="s2">UPDATE blocking_test SET value=999 WHERE id=1;&#39; | sqlplus -s testuser/testpassword@localhost:1521/XEPDB1 &amp;&quot;</span>
+<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a>
+<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a>sleep<span class="w"> </span><span class="m">3</span>
+<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a>
+<a id="__codelineno-31-7" name="__codelineno-31-7" href="#__codelineno-31-7"></a><span class="c1"># Session 2 — blocked</span>
+<a id="__codelineno-31-8" name="__codelineno-31-8" href="#__codelineno-31-8"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-i<span class="w"> </span>ai-dba-oracle-test<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;echo &#39;UPDATE blocking_test SET value=888 WHERE id=1;&#39; | sqlplus -s testuser/testpassword@localhost:1521/XEPDB1 &amp;&quot;</span>
+<a id="__codelineno-31-9" name="__codelineno-31-9" href="#__codelineno-31-9"></a>
+<a id="__codelineno-31-10" name="__codelineno-31-10" href="#__codelineno-31-10"></a>sleep<span class="w"> </span><span class="m">3</span>
+</code></pre></div>
+<p>While both sessions are active:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>blocking-chains<span class="w"> </span>oracle-test<span class="w"> </span>--json
+</code></pre></div></p>
+<p><strong>Expected JSON:</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="p">{</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="w">  </span><span class="nt">&quot;chains&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="w">    </span><span class="nt">&quot;engine_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;oracle-test&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="w">    </span><span class="nt">&quot;blocking_pid&quot;</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;</span><span class="kc">nu</span><span class="err">mber&gt;</span><span class="p">,</span>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="w">    </span><span class="nt">&quot;blocked_pid&quot;</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;</span><span class="kc">nu</span><span class="err">mber&gt;</span><span class="p">,</span>
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="w">    </span><span class="nt">&quot;wait_duration_ms&quot;</span><span class="p">:</span><span class="w"> </span><span class="err">&lt;posi</span><span class="kc">t</span><span class="err">ive</span><span class="w"> </span><span class="kc">nu</span><span class="err">mber&gt;</span><span class="p">,</span>
+<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="w">    </span><span class="nt">&quot;wait_event&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;enq: TX - row lock contention&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="w">    </span><span class="nt">&quot;blocking_query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;UPDATE blocking_test SET value=999 WHERE id=1&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a><span class="w">    </span><span class="nt">&quot;blocked_query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;UPDATE blocking_test SET value=888 WHERE id=1&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a><span class="w">    </span><span class="nt">&quot;database_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;TESTUSER&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-11" name="__codelineno-33-11" href="#__codelineno-33-11"></a><span class="w">    </span><span class="nt">&quot;wait_type&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;enq&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-12" name="__codelineno-33-12" href="#__codelineno-33-12"></a><span class="w">    </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;ACTIVE&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-13" name="__codelineno-33-13" href="#__codelineno-33-13"></a><span class="w">    </span><span class="nt">&quot;host_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;&lt;hostname&gt;&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-14" name="__codelineno-33-14" href="#__codelineno-33-14"></a><span class="w">    </span><span class="nt">&quot;program_name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;sqlplus&quot;</span><span class="p">,</span>
+<a id="__codelineno-33-15" name="__codelineno-33-15" href="#__codelineno-33-15"></a><span class="w">    </span><span class="nt">&quot;login_time&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span>
+<a id="__codelineno-33-16" name="__codelineno-33-16" href="#__codelineno-33-16"></a><span class="w">  </span><span class="p">}],</span>
+<a id="__codelineno-33-17" name="__codelineno-33-17" href="#__codelineno-33-17"></a><span class="w">  </span><span class="nt">&quot;count&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span>
+<a id="__codelineno-33-18" name="__codelineno-33-18" href="#__codelineno-33-18"></a><span class="p">}</span>
+</code></pre></div></p>
+<h3 id="known-issues_1">Known Issues</h3>
+<ul>
+<li><strong>v$ permission fallback:</strong> <code>listProcesses</code> and <code>getBlockingChains</code> require SELECT ANY DICTIONARY. Without it, they return empty arrays (ORA-00942/ORA-01031 caught gracefully). Grant with: <code>GRANT SELECT ANY DICTIONARY TO testuser;</code></li>
+<li><strong>Bind variable names:</strong> <code>:table</code> is a reserved bind variable in oracledb. The connector uses <code>:tbl</code> instead. Column aliases (<code>AS name</code>) also conflict — the connector uses positional indexing (row[0], row[1], etc.).</li>
+<li><strong>Uppercase identifiers:</strong> Oracle stores identifiers in uppercase by default. Table names, column names, and index names come back uppercase. The integration test assertions handle both cases.</li>
+<li><strong>user_objects vs all_objects:</strong> <code>user_objects</code> has no <code>OWNER</code> column. The connector uses <code>USER AS schema</code> for the default case and <code>all_objects</code> (which has <code>OWNER</code>) for schema-filtered queries.</li>
+<li><strong>Thin mode:</strong> oracledb thin mode (default in v6+) doesn't need Oracle Instant Client. If thick mode is needed, install Instant Client and call <code>oracledb.initOracleClient()</code>.</li>
+</ul>
+<h3 id="troubleshooting_1">Troubleshooting</h3>
+<ul>
+<li><strong>Oracle XE slow startup:</strong> 30-60s is normal. Health check has retries: 10.</li>
+<li><strong>ORA-12541:</strong> Listener not ready yet. Wait longer.</li>
+<li><strong>ORA-01017:</strong> Invalid credentials. Check ORACLE_PASSWORD / APP_USER_PASSWORD.</li>
+<li><strong>ORA-00942 on v$ views:</strong> Needs SELECT ANY DICTIONARY. Grant it or accept empty results.</li>
+</ul>
+<hr />
+<h2 id="sprint-6-mongodb">Sprint 6 - MongoDB</h2>
+<p><strong>Status:</strong> MERGED (PR #13)
+<strong>Driver:</strong> <code>mongodb</code> (official Node.js driver, ESM-native)
+<strong>Docker image:</strong> <code>mongo:7</code>
+<strong>Port:</strong> 12017 (host) → 27017 (container)</p>
+<h3 id="prerequisites_2">Prerequisites</h3>
+<ul>
+<li>Docker</li>
+<li><code>npm install</code> includes <code>mongodb</code> (already in package.json)</li>
+</ul>
+<h3 id="docker-setup-in-docker-composeyml_2">Docker Setup (in docker-compose.yml)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="w">  </span><span class="nt">mongodb-test</span><span class="p">:</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mongo:7</span>
+<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="w">    </span><span class="nt">container_name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ai-dba-mongodb-test</span>
+<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="w">    </span><span class="nt">restart</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unless-stopped</span>
+<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="w">    </span><span class="nt">ports</span><span class="p">:</span>
+<a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="s">&quot;12017:27017&quot;</span>
+<a id="__codelineno-34-7" name="__codelineno-34-7" href="#__codelineno-34-7"></a><span class="w">    </span><span class="nt">environment</span><span class="p">:</span>
+<a id="__codelineno-34-8" name="__codelineno-34-8" href="#__codelineno-34-8"></a><span class="w">      </span><span class="nt">MONGO_INITDB_ROOT_USERNAME</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">testuser</span>
+<a id="__codelineno-34-9" name="__codelineno-34-9" href="#__codelineno-34-9"></a><span class="w">      </span><span class="nt">MONGO_INITDB_ROOT_PASSWORD</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">testpassword</span>
+<a id="__codelineno-34-10" name="__codelineno-34-10" href="#__codelineno-34-10"></a><span class="w">      </span><span class="nt">MONGO_INITDB_DATABASE</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">testdb</span>
+<a id="__codelineno-34-11" name="__codelineno-34-11" href="#__codelineno-34-11"></a><span class="w">    </span><span class="nt">healthcheck</span><span class="p">:</span>
+<a id="__codelineno-34-12" name="__codelineno-34-12" href="#__codelineno-34-12"></a><span class="w">      </span><span class="nt">test</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">&quot;CMD-SHELL&quot;</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">&quot;mongosh</span><span class="nv"> </span><span class="s">--quiet</span><span class="nv"> </span><span class="s">--eval</span><span class="nv"> </span><span class="s">&#39;db.runCommand({ping:1}).ok&#39;</span><span class="nv"> </span><span class="s">|</span><span class="nv"> </span><span class="s">grep</span><span class="nv"> </span><span class="s">-q</span><span class="nv"> </span><span class="s">&#39;1&#39;&quot;</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-34-13" name="__codelineno-34-13" href="#__codelineno-34-13"></a><span class="w">      </span><span class="nt">interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">10s</span>
+<a id="__codelineno-34-14" name="__codelineno-34-14" href="#__codelineno-34-14"></a><span class="w">      </span><span class="nt">timeout</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5s</span>
+<a id="__codelineno-34-15" name="__codelineno-34-15" href="#__codelineno-34-15"></a><span class="w">      </span><span class="nt">retries</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span>
+</code></pre></div>
+<h3 id="config-in-configyamlexample_2">Config (in config.yaml.example)</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="w">  </span><span class="nt">mongodb-test</span><span class="p">:</span>
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mongodb</span>
+<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="w">    </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mongodb://testuser:testpassword@127.0.0.1:12017/testdb?authSource=admin</span>
+</code></pre></div>
+<h3 id="manual-test-procedure_2">Manual Test Procedure</h3>
+<p><strong>Step 1: Start container</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w"> </span>mongodb-test
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a>docker<span class="w"> </span>inspect<span class="w"> </span>--format<span class="o">=</span><span class="s1">&#39;{{.State.Health.Status}}&#39;</span><span class="w"> </span>ai-dba-mongodb-test
+<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="c1"># Wait for &quot;healthy&quot;</span>
+</code></pre></div></p>
+<p><strong>Step 2: Create test data</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ai-dba-mongodb-test<span class="w"> </span>mongosh<span class="w"> </span><span class="s2">&quot;mongodb://testuser:testpassword@127.0.0.1:27017/testdb?authSource=admin&quot;</span><span class="w"> </span>--quiet<span class="w"> </span>--eval<span class="w"> </span><span class="s1">&#39;db.blocking_test.deleteMany({}); db.blocking_test.insertMany([{name:&quot;alpha&quot;,value:1},{name:&quot;beta&quot;,value:2},{name:&quot;gamma&quot;,value:3}]); db.blocking_test.countDocuments()&#39;</span>
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="c1"># Expected: 3</span>
+</code></pre></div></p>
+<p><strong>Step 3: Run unit tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>npm<span class="w"> </span><span class="nb">test</span>
+<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="c1"># Expected: 10 test files, 39 tests (includes 4 MongoDB URL parser tests)</span>
+</code></pre></div></p>
+<p><strong>Step 4: Run integration tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a>node<span class="w"> </span>test/integration-all.mjs
+<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="c1"># Expected: 121 tests total, 0 failures (includes 24 MongoDB tests)</span>
+</code></pre></div></p>
+<p><strong>Step 5: CLI tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>list-engines
+<a id="__codelineno-40-2" name="__codelineno-40-2" href="#__codelineno-40-2"></a><span class="c1"># Expected: 5 engines including mongodb-test</span>
+<a id="__codelineno-40-3" name="__codelineno-40-3" href="#__codelineno-40-3"></a>
+<a id="__codelineno-40-4" name="__codelineno-40-4" href="#__codelineno-40-4"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>blocking-chains<span class="w"> </span>mongodb-test
+<a id="__codelineno-40-5" name="__codelineno-40-5" href="#__codelineno-40-5"></a><span class="c1"># Expected: &quot;No blocking chains found on mongodb-test&quot; (or equivalent for long-running ops)</span>
+</code></pre></div></p>
+<p><strong>Step 6: REPL tests</strong>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>repl
+<a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>use<span class="w"> </span>mongodb-test
+<a id="__codelineno-41-3" name="__codelineno-41-3" href="#__codelineno-41-3"></a>databases<span class="w">         </span>—<span class="w"> </span>should<span class="w"> </span>list<span class="w"> </span>testdb,<span class="w"> </span>admin,<span class="w"> </span>config,<span class="w"> </span><span class="nb">local</span>
+<a id="__codelineno-41-4" name="__codelineno-41-4" href="#__codelineno-41-4"></a>tables<span class="w">            </span>—<span class="w"> </span>should<span class="w"> </span>list<span class="w"> </span>collections:<span class="w"> </span>blocking_test
+<a id="__codelineno-41-5" name="__codelineno-41-5" href="#__codelineno-41-5"></a>describe<span class="w"> </span>blocking_test<span class="w"> </span>—<span class="w"> </span>field<span class="w"> </span>info:<span class="w"> </span>_id<span class="w"> </span><span class="o">(</span>ObjectId,<span class="w"> </span>PRI<span class="o">)</span>,<span class="w"> </span>name<span class="w"> </span><span class="o">(</span>string<span class="o">)</span>,<span class="w"> </span>value<span class="w"> </span><span class="o">(</span>number<span class="o">)</span>
+<a id="__codelineno-41-6" name="__codelineno-41-6" href="#__codelineno-41-6"></a>indexes<span class="w"> </span>blocking_test<span class="w">  </span>—<span class="w"> </span>_id_<span class="w"> </span>index<span class="w"> </span><span class="o">(</span>UNIQUE,<span class="w"> </span>PRIMARY<span class="o">)</span>
+<a id="__codelineno-41-7" name="__codelineno-41-7" href="#__codelineno-41-7"></a>processes<span class="w">         </span>—<span class="w"> </span>active<span class="w"> </span>connections/ops
+<a id="__codelineno-41-8" name="__codelineno-41-8" href="#__codelineno-41-8"></a>blocking-chains<span class="w">   </span>—<span class="w"> </span>no<span class="w"> </span>chains<span class="w"> </span><span class="o">(</span>or<span class="w"> </span>long-running<span class="w"> </span>ops<span class="w"> </span><span class="k">if</span><span class="w"> </span>any<span class="o">)</span>
+</code></pre></div></p>
+<p><strong>Step 7: Query via JSON command documents</strong></p>
+<p>MongoDB <code>query()</code> accepts JSON command documents instead of SQL:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>repl
+<a id="__codelineno-42-2" name="__codelineno-42-2" href="#__codelineno-42-2"></a>use<span class="w"> </span>mongodb-test
+<a id="__codelineno-42-3" name="__codelineno-42-3" href="#__codelineno-42-3"></a><span class="c1"># Find documents</span>
+<a id="__codelineno-42-4" name="__codelineno-42-4" href="#__codelineno-42-4"></a>sql<span class="w"> </span><span class="o">{</span><span class="s2">&quot;find&quot;</span>:<span class="w"> </span><span class="s2">&quot;blocking_test&quot;</span>,<span class="w"> </span><span class="s2">&quot;filter&quot;</span>:<span class="w"> </span><span class="o">{}</span>,<span class="w"> </span><span class="s2">&quot;limit&quot;</span>:<span class="w"> </span><span class="m">1</span><span class="o">}</span>
+<a id="__codelineno-42-5" name="__codelineno-42-5" href="#__codelineno-42-5"></a>
+<a id="__codelineno-42-6" name="__codelineno-42-6" href="#__codelineno-42-6"></a><span class="c1"># Count documents</span>
+<a id="__codelineno-42-7" name="__codelineno-42-7" href="#__codelineno-42-7"></a>sql<span class="w"> </span><span class="o">{</span><span class="s2">&quot;count&quot;</span>:<span class="w"> </span><span class="s2">&quot;blocking_test&quot;</span>,<span class="w"> </span><span class="s2">&quot;filter&quot;</span>:<span class="w"> </span><span class="o">{}}</span>
+<a id="__codelineno-42-8" name="__codelineno-42-8" href="#__codelineno-42-8"></a>
+<a id="__codelineno-42-9" name="__codelineno-42-9" href="#__codelineno-42-9"></a><span class="c1"># Distinct values</span>
+<a id="__codelineno-42-10" name="__codelineno-42-10" href="#__codelineno-42-10"></a>sql<span class="w"> </span><span class="o">{</span><span class="s2">&quot;distinct&quot;</span>:<span class="w"> </span><span class="s2">&quot;blocking_test&quot;</span>,<span class="w"> </span><span class="s2">&quot;field&quot;</span>:<span class="w"> </span><span class="s2">&quot;name&quot;</span>,<span class="w"> </span><span class="s2">&quot;filter&quot;</span>:<span class="w"> </span><span class="o">{}}</span>
+<a id="__codelineno-42-11" name="__codelineno-42-11" href="#__codelineno-42-11"></a>
+<a id="__codelineno-42-12" name="__codelineno-42-12" href="#__codelineno-42-12"></a><span class="c1"># Ping</span>
+<a id="__codelineno-42-13" name="__codelineno-42-13" href="#__codelineno-42-13"></a>sql<span class="w"> </span><span class="o">{</span><span class="s2">&quot;ping&quot;</span>:<span class="w"> </span><span class="m">1</span><span class="o">}</span>
+</code></pre></div></p>
+<p><strong>Step 8: Blocking/long-running ops scenario</strong></p>
+<p>MongoDB doesn't have traditional row locks like SQL databases. Instead, test long-running operations:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-43-1" name="__codelineno-43-1" href="#__codelineno-43-1"></a><span class="c1"># Start a long-running operation in one session</span>
+<a id="__codelineno-43-2" name="__codelineno-43-2" href="#__codelineno-43-2"></a>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>ai-dba-mongodb-test<span class="w"> </span>mongosh<span class="w"> </span><span class="s2">&quot;mongodb://testuser:testpassword@127.0.0.1:27017/testdb?authSource=admin&quot;</span><span class="w"> </span>--eval<span class="w"> </span><span class="s1">&#39;</span>
+<a id="__codelineno-43-3" name="__codelineno-43-3" href="#__codelineno-43-3"></a><span class="s1">db.blocking_test.find({ $where: &quot;sleep(15000) || true&quot; }).toArray();</span>
+<a id="__codelineno-43-4" name="__codelineno-43-4" href="#__codelineno-43-4"></a><span class="s1">&#39;</span><span class="w"> </span><span class="p">&amp;</span>
+<a id="__codelineno-43-5" name="__codelineno-43-5" href="#__codelineno-43-5"></a>
+<a id="__codelineno-43-6" name="__codelineno-43-6" href="#__codelineno-43-6"></a>sleep<span class="w"> </span><span class="m">3</span>
+<a id="__codelineno-43-7" name="__codelineno-43-7" href="#__codelineno-43-7"></a>
+<a id="__codelineno-43-8" name="__codelineno-43-8" href="#__codelineno-43-8"></a><span class="c1"># Check for long-running ops</span>
+<a id="__codelineno-43-9" name="__codelineno-43-9" href="#__codelineno-43-9"></a>node<span class="w"> </span>dist/index.js<span class="w"> </span>--config<span class="w"> </span>config.yaml<span class="w"> </span>blocking-chains<span class="w"> </span>mongodb-test<span class="w"> </span>--json
+</code></pre></div>
+<p><strong>Expected:</strong> JSON with long-running op info (opid, secs_running, command, client).</p>
+<h3 id="known-issues_2">Known Issues</h3>
+<ul>
+<li><strong>Schema inference is sampled:</strong> <code>describeTable</code> infers types from up to 100 sampled documents. If the collection is empty, only <code>_id</code> is returned.</li>
+<li><strong><code>_id_</code> index uniqueness:</strong> MongoDB's default <code>_id_</code> index doesn't set <code>unique: true</code> in the <code>listIndexes()</code> result. The connector checks <code>idx.name === "_id_"</code> as a fallback for uniqueness.</li>
+<li><strong>JSON command API:</strong> <code>query()</code> accepts JSON command documents (find, aggregate, count, distinct, ping) instead of SQL. Read-only guard allows only these operations.</li>
+<li><strong>currentOp privileges:</strong> <code>listProcesses</code> and <code>getBlockingChains</code> use <code>db.currentOp()</code> which may require the <code>clusterMonitor</code> or <code>root</code> role.</li>
+</ul>
+<h3 id="troubleshooting_2">Troubleshooting</h3>
+<ul>
+<li><strong>MongoDB "blocking" is different:</strong> MongoDB uses document-level locking (WiredTiger) and doesn't have traditional blocking chains. The connector reports long-running operations via <code>db.currentOp()</code> instead.</li>
+<li><strong>Auth failures:</strong> Use <code>authSource=admin</code> in the URL when connecting to the root user.</li>
+<li><strong>mongosh auth format:</strong> Use the full connection URI: <code>mongosh "mongodb://testuser:testpassword@127.0.0.1:27017/testdb?authSource=admin"</code>. Don't use bare <code>mongosh testdb</code> — auth will fail.</li>
+</ul>
+<hr />
+<h2 id="master-test-checklist">Master Test Checklist</h2>
+<p>Run this checklist after all sprints are merged:</p>
+<h3 id="pre-flight">Pre-flight</h3>
+<ul>
+<li>[ ] <code>npm install</code> — no errors</li>
+<li>[ ] <code>npm run build</code> — TypeScript compiles, 0 errors</li>
+<li>[ ] <code>npm test</code> — 39 unit tests pass</li>
+<li>[ ] <code>docker compose up -d</code> — all 5 containers healthy (MySQL 13306, PostgreSQL 15432, SQL Server 11433, Oracle 11521, MongoDB 12017)</li>
+</ul>
+<h3 id="per-engine-verification">Per-engine verification</h3>
+<p>For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb-test):</p>
+<ul>
+<li>[ ] <code>list-engines</code> shows the engine with correct host/port</li>
+<li>[ ] REPL <code>databases</code> returns expected databases</li>
+<li>[ ] REPL <code>tables</code> returns blocking_test table/collection</li>
+<li>[ ] REPL <code>describe blocking_test</code> returns columns with correct types</li>
+<li>[ ] REPL <code>indexes blocking_test</code> returns primary key index</li>
+<li>[ ] REPL <code>processes</code> returns active connections</li>
+<li>[ ] REPL <code>blocking-chains</code> returns "no chains" when idle</li>
+<li>[ ] MCP <code>databases</code> tool returns JSON</li>
+<li>[ ] MCP <code>tables</code> tool returns JSON</li>
+<li>[ ] MCP <code>describe-table</code> tool returns JSON</li>
+<li>[ ] MCP <code>indexes</code> tool returns JSON</li>
+<li>[ ] MCP <code>processes</code> tool returns JSON</li>
+<li>[ ] MCP <code>blocking-chains</code> tool returns JSON</li>
+</ul>
+<h3 id="blocking-scenario-per-engine">Blocking scenario per engine</h3>
+<ul>
+<li>[ ] MySQL — row lock detected, correct PIDs, queries, wait time</li>
+<li>[ ] PostgreSQL — table lock detected, correct PIDs, queries, wait event</li>
+<li>[ ] SQL Server — row lock detected, wait_type = LCK_M_X</li>
+<li>[ ] Oracle — row lock detected, wait_event = enq: TX - row lock contention (requires SELECT ANY DICTIONARY)</li>
+<li>[ ] MongoDB — long-running op detected (if applicable)</li>
+</ul>
+<h3 id="integration-tests">Integration tests</h3>
+<ul>
+<li>[ ] <code>node test/integration-all.mjs</code> — 121 tests pass</li>
+</ul>
+<h3 id="mcp-server">MCP server</h3>
+<ul>
+<li>[ ] <code>tools/list</code> returns 6 tools</li>
+<li>[ ] Each tool accepts engineId and returns valid JSON</li>
+<li>[ ] Unknown engineId returns error</li>
+<li>[ ] Unsupported engine type returns error</li>
+<li>[ ] Connector errors are propagated as error responses</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "search.suggest", "search.highlight", "content.code.copy"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
