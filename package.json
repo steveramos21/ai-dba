@@ -27,6 +27,7 @@
     "js-yaml": "^4.1.0",
     "mysql2": "^3.0.0",
     "pg": "^8.21.0",
+    "tedious": "^20.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -179,12 +179,30 @@ npm test            — run Vitest tests
 
 ---
 
-## Planned Sprints
+## Sprint 4 — SQL Server Connector (COMPLETED)
 
-### Sprint 4 — SQL Server Connector
-- `tedious` driver
-- `sys.dm_exec_requests` + `sys.dm_os_waiting_tasks` for blocking chains
-- Docker SQL Server container
+### What was built:
+- `tedious` driver with promise-based wrapper (`TediousConnection` class)
+- All 7 connector methods: listDatabases, listTables, describeTable, listIndexes, listProcesses, query, getBlockingChains
+- Docker SQL Server 2022 container (port 11433, Express edition)
+- `sqlserver://` URL scheme support in CLI + REPL
+- 4 new unit tests (`parseSqlServerUrl` — extraction, defaults, URL-encoding, invalid)
+- 24 new integration tests against live SQL Server 2022
+
+### Sprint 4 Retro:
+- Integration testing caught 6 bugs that mocked tests missed:
+  1. `connect()` never called `this.conn.connect()` — silent hang on first query
+  2. `isPrimary`/`isUnique` — tedious returns JS booleans, not 0/1 (BIT columns)
+  3. `isAutoIncrement` — same BIT boolean issue, fixed with `Boolean()`
+  4. `listProcesses` — returned 70+ system processes, filtered to user processes only (`session_id >= 50 AND is_user_process = 1`)
+  5. `listTables` — `TABLE_CATALOG` vs `TABLE_SCHEMA` for database/schema filter
+  6. `Request` event types — tedious `.d.ts` doesn't expose `columnMetadata`/`row` as typed events, cast through `any`
+- Known limitations: no connection pooling (each call creates new TCP connection), SQL Server blocking scenario not automated in integration-blocking.mjs (documented in TESTING.md for manual verification)
+- Test results: 31 unit + 72 integration = 103 tests, all passing
+
+---
+
+## Planned Sprints
 
 ### Sprint 5 — Oracle Connector
 - `oracledb` driver
