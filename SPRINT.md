@@ -202,12 +202,31 @@ npm test            — run Vitest tests
 
 ---
 
-## Planned Sprints
+## Sprint 5 — Oracle Connector (COMPLETED)
 
-### Sprint 5 — Oracle Connector
-- `oracledb` driver
-- `v$session` + `v$session_wait` for blocking chains
-- Docker Oracle XE container
+### What was built:
+- `oracledb` thin mode (no Oracle Instant Client needed)
+- All 7 connector methods: listDatabases, listTables, describeTable, listIndexes, listProcesses, query, getBlockingChains
+- Docker Oracle XE 21 container (port 11521, gvenzl/oracle-xe:21-slim)
+- `oracle://` URL scheme support in CLI + REPL
+- 4 new unit tests (`parseOracleUrl` — extraction, defaults, URL-encoding, invalid)
+- 24 new integration tests against live Oracle XE 21
+- Graceful `v$` permission fallback — `listProcesses`/`getBlockingChains` return empty arrays if user lacks SELECT ANY DICTIONARY
+
+### Sprint 5 Retro:
+- Integration testing caught 6 bugs that mocked tests missed:
+  1. `user_objects` has no `OWNER` column → fixed with `USER AS schema`
+  2. `:table` is a reserved bind variable in oracledb → renamed to `:tbl`
+  3. Column aliases (`AS name`) conflict with bind variables → removed them, use positional indexing
+  4. Oracle requires `FROM DUAL` for bare SELECT → handled in test assertions
+  5. Oracle uppercases identifiers by default → test assertions handle both `ID`/`id`, `VAL`/`val`
+  6. `v$session` requires SELECT ANY DICTIONARY → graceful fallback to empty array on ORA-00942/ORA-01031
+- Known limitations: `listProcesses`/`getBlockingChains` return empty without SELECT ANY DICTIONARY privilege; Oracle blocking scenario documented in TESTING.md for manual verification; no connection pooling
+- Test results: 35 unit + 96 integration = 131 tests, all passing
+
+---
+
+## Planned Sprints
 
 ### Sprint 6 — MongoDB Connector
 - `mongodb` driver
