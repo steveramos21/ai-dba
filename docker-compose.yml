@@ -47,3 +47,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  oracle-test:
+    image: gvenzl/oracle-xe:21-slim
+    container_name: ai-dba-oracle-test
+    restart: unless-stopped
+    ports:
+      - "11521:1521"
+    environment:
+      ORACLE_PASSWORD: testpassword
+      APP_USER: testuser
+      APP_USER_PASSWORD: testpassword
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -s testuser/testpassword@localhost:1521/XEPDB1 2>/dev/null | grep -q '1'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10

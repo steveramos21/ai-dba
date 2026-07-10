@@ -25,6 +25,10 @@ engines:
     type: sqlserver
     url: sqlserver://sa:TestPassword123!@127.0.0.1:11433/testdb
 
+  oracle-test:
+    type: oracle
+    url: oracle://testuser:testpassword@127.0.0.1:11521/XEPDB1
+
   # PostgreSQL with SSL
   # postgres-prod:
   #   type: postgres
