@@ -202,9 +202,8 @@ program
     }
 
     const { id: engineId, config: engineConfig, maskedUrl } = result;
-    const { mysqlConnector } = await import("./connectors/mysql.js");
-    const { postgresConnector } = await import("./connectors/postgres.js");
-    const connectors: Record<string, DatabaseConnector> = { mysql: mysqlConnector, postgres: postgresConnector };
+    const { buildConnectorMap } = await import("./server.js");
+    const connectors: Record<string, DatabaseConnector> = buildConnectorMap();
 
     // Verify connection
     const connector = getConnectorForEngineById(engineId, engineConfig, connectors);
@@ -226,7 +225,14 @@ program
       return connectors[e.type] ?? null;
     }
 
-    await startRepl(config, engineId, connectors, getConnectorForEngine);
+    try {
+      await startRepl(config, engineId, connectors, getConnectorForEngine);
+    } catch (err: any) {
+      if (err?.name === "ExitPromptError" || err?.message?.includes("force closed")) {
+        process.exit(0);
+      }
+      throw err;
+    }
   });
 
 // ─── list-engines ──────────────────────────────────────────────
@@ -264,6 +270,169 @@ program
       console.log(table.toString());
     }
     process.exit(0);
+  });
+
+// ─── CLI subcommands (databases, tables, describe, indexes, processes) ─
+// Helper: resolve engine from config + get connector
+async function resolveEngine(engineId: string): Promise<{ engine: EngineConfig; connector: DatabaseConnector; connectors: Record<string, DatabaseConnector> }> {
+  const { buildConnectorMap } = await import("./server.js");
+  const opts = program.opts();
+  const config = loadConfig(opts.config);
+  const engine = config.engines[engineId];
+  if (!engine) {
+    console.error(chalk.red(`Unknown engine "${engineId}". Available: ${Object.keys(config.engines).join(", ")}`));
+    process.exit(1);
+  }
+  const connectors = buildConnectorMap();
+  const connector = connectors[engine.type];
+  if (!connector) {
+    console.error(chalk.red(`Engine "${engineId}" is type "${engine.type}". No connector registered.`));
+    process.exit(1);
+  }
+  return { engine, connector, connectors };
+}
+
+program
+  .command("databases <engineId>")
+  .description("List databases on an engine")
+  .action(async (engineId: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const dbs = await connector.listDatabases(engineId, engine);
+      const table = new Table({ head: [chalk.white("Database")] });
+      for (const db of dbs) table.push([db.name]);
+      console.log(table.toString());
+      console.log(chalk.dim(`${dbs.length} database(s)`));
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+program
+  .command("tables <engineId> [database]")
+  .description("List tables on an engine (optional database/schema filter)")
+  .action(async (engineId: string, database?: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const tbls = await connector.listTables(engineId, engine, database);
+      const table = new Table({ head: [chalk.white("Table"), chalk.white("Rows"), chalk.white("Size"), chalk.white("Engine"), chalk.white("Collation")] });
+      for (const t of tbls) {
+        table.push([
+          t.name,
+          t.rows?.toLocaleString() ?? "-",
+          t.sizeBytes ? `${(t.sizeBytes / 1024).toFixed(1)} KB` : "-",
+          t.engine ?? "-",
+          t.collation ?? "-",
+        ]);
+      }
+      console.log(table.toString());
+      console.log(chalk.dim(`${tbls.length} table(s)`));
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+program
+  .command("describe <engineId> <table> [database]")
+  .description("Describe table columns on an engine")
+  .action(async (engineId: string, table: string, database?: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const cols = await connector.describeTable(engineId, engine, table, database);
+      if (cols.length === 0) {
+        console.log(chalk.yellow(`Table "${table}" not found or has no columns.`));
+        process.exit(0);
+      }
+      const t = new Table({ head: [chalk.white("Column"), chalk.white("Type"), chalk.white("Null"), chalk.white("Key"), chalk.white("Default"), chalk.white("Extra")] });
+      for (const c of cols) {
+        t.push([
+          c.name,
+          c.type,
+          c.nullable ? chalk.dim("YES") : chalk.red("NO"),
+          c.isPrimary ? chalk.green("PRI") : "",
+          c.defaultValue ?? chalk.dim("NULL"),
+          c.isAutoIncrement ? "auto_increment" : "",
+        ]);
+      }
+      console.log(t.toString());
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+program
+  .command("indexes <engineId> <table> [database]")
+  .description("List indexes on a table on an engine")
+  .action(async (engineId: string, tableName: string, database?: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const idxs = await connector.listIndexes(engineId, engine, tableName, database);
+      if (idxs.length === 0) {
+        console.log(chalk.yellow(`No indexes found on "${tableName}".`));
+        process.exit(0);
+      }
+      const table = new Table({ head: [chalk.white("Index"), chalk.white("Columns"), chalk.white("Unique"), chalk.white("Type")] });
+      for (const idx of idxs) {
+        table.push([
+          idx.isPrimary ? chalk.green(idx.name) : idx.name,
+          idx.columns.join(", "),
+          idx.isUnique ? chalk.green("YES") : chalk.dim("no"),
+          idx.type ?? "-",
+        ]);
+      }
+      console.log(table.toString());
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+program
+  .command("processes <engineId>")
+  .description("Show active processes on an engine")
+  .action(async (engineId: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const procs = await connector.listProcesses(engineId, engine);
+      const table = new Table({
+        head: [chalk.white("PID"), chalk.white("User"), chalk.white("Host"), chalk.white("DB"), chalk.white("Command"), chalk.white("Time"), chalk.white("State")],
+        wordWrap: true,
+      });
+      for (const p of procs) {
+        table.push([
+          p.pid,
+          p.user,
+          p.host,
+          p.database ?? chalk.dim("-"),
+          p.command,
+          `${p.time}s`,
+          (p.state ?? "-").substring(0, 40),
+        ]);
+      }
+      console.log(table.toString());
+      console.log(chalk.dim(`${procs.length} process(es)`));
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
   });
 
 // ─── REPL logic (shared by repl and connect commands) ─────────
@@ -688,8 +857,7 @@ program
   .command("repl")
   .description("Interactive REPL for database diagnostics")
   .action(async () => {
-    const { mysqlConnector } = await import("./connectors/mysql.js");
-    const { postgresConnector } = await import("./connectors/postgres.js");
+    const { buildConnectorMap } = await import("./server.js");
     const opts = program.opts();
 
     // Load config if it exists, otherwise start with empty engines
@@ -700,10 +868,7 @@ program
       config = { engines: {} };
     }
 
-    const connectors: Record<string, DatabaseConnector> = {
-      mysql: mysqlConnector,
-      postgres: postgresConnector,
-    };
+    const connectors: Record<string, DatabaseConnector> = buildConnectorMap();
 
     const engineIds = () => Object.keys(config.engines);
     const initialEngine = engineIds()[0] ?? "";
@@ -714,7 +879,14 @@ program
       return connectors[engine.type] ?? null;
     }
 
-    await startRepl(config, initialEngine, connectors, getConnectorForEngine);
+    try {
+      await startRepl(config, initialEngine, connectors, getConnectorForEngine);
+    } catch (err: any) {
+      if (err?.name === "ExitPromptError" || err?.message?.includes("force closed")) {
+        process.exit(0);
+      }
+      throw err;
+    }
   });
 
 program.parse();

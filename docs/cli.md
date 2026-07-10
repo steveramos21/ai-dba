@@ -38,6 +38,38 @@ node dist/index.js --config config.yaml blocking-chains my-mysql
 node dist/index.js --config config.yaml blocking-chains my-mysql --json
 ```
 
+### `databases`
+List databases on an engine:
+```bash
+node dist/index.js --config config.yaml databases my-mysql
+```
+
+### `tables`
+List tables (optional database/schema filter):
+```bash
+node dist/index.js --config config.yaml tables my-mysql
+node dist/index.js --config config.yaml tables my-mysql information_schema
+node dist/index.js --config config.yaml tables mongodb-test testdb
+```
+
+### `describe`
+Show column metadata for a table:
+```bash
+node dist/index.js --config config.yaml describe my-mysql blocking_test
+```
+
+### `indexes`
+List indexes on a table:
+```bash
+node dist/index.js --config config.yaml indexes my-mysql blocking_test
+```
+
+### `processes`
+Show active connections on an engine:
+```bash
+node dist/index.js --config config.yaml processes my-mysql
+```
+
 ### `--version`
 ```bash
 node dist/index.js --version
