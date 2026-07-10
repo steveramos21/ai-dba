@@ -1,18 +1,19 @@
 # AI-DBA Manual Testing Guide
 
-This guide covers manual testing procedures for all sprints. Run through each section after the corresponding sprint is merged to verify functionality against live databases.
+This guide covers manual testing procedures for all sprints. Each section reflects the actual merged state of the codebase.
 
 ## Quick Reference
 
 | Sprint | Scope | Status | Test Doc |
 |--------|-------|--------|----------|
-| 1 | Blocking chains (MySQL) | MERGED | [Sprint 1-3 Tests](#sprints-1-3-merged) |
-| 2 | PostgreSQL connector | MERGED | [Sprint 1-3 Tests](#sprints-1-3-merged) |
-| 3 | MCP DBA tools + CI | MERGED | [Sprint 1-3 Tests](#sprints-1-3-merged) |
-| 4 | SQL Server connector | PLANNED | [Sprint 4 — SQL Server](#sprint-4--sql-server) |
-| 5 | Oracle connector | PLANNED | [Sprint 5 — Oracle](#sprint-5--oracle) |
-| 6 | MongoDB connector | PLANNED | [Sprint 6 — MongoDB](#sprint-6--mongodb) |
-| 7 | Documentation site | PLANNED | [Sprint 7 — Docs Site](#sprint-7--docs-site) |
+| 1 | Blocking chains (MySQL) | MERGED | [Sprints 1-3 Tests](#sprints-1-3-merged) |
+| 2 | PostgreSQL connector | MERGED | [Sprints 1-3 Tests](#sprints-1-3-merged) |
+| 3 | MCP DBA tools + CI | MERGED | [Sprints 1-3 Tests](#sprints-1-3-merged) |
+| 4 | SQL Server connector | MERGED | [Sprint 4 — SQL Server](#sprint-4--sql-server) |
+| 5 | Oracle connector | MERGED | [Sprint 5 — Oracle](#sprint-5--oracle) |
+| 6 | MongoDB connector | MERGED | [Sprint 6 — MongoDB](#sprint-6--mongodb) |
+
+**Test totals:** 39 unit tests + 121 integration tests = 160 tests, all passing.
 
 ## Prerequisites (all sprints)
 
@@ -31,22 +32,20 @@ docker info | head -3
 
 ## Sprints 1-3 (MERGED)
 
-These are already built and merged. Run these tests to verify the current state before starting Sprint 4.
-
 ### 1. Unit Tests (no Docker needed)
 
 ```bash
 npm test
 ```
 
-**Expected:** 7 test files, 27 tests, all passing. Duration ~10s.
+**Expected:** 10 test files, 39 tests, all passing. Duration ~20s.
 
 ### 2. Integration Tests (Docker required)
 
 Start containers:
 ```bash
 docker compose up -d
-# Wait for healthy
+# Wait for all containers to be healthy
 docker inspect --format='{{.State.Health.Status}}' ai-dba-mysql-test
 docker inspect --format='{{.State.Health.Status}}' ai-dba-postgres-test
 # Both must show "healthy"
@@ -65,18 +64,11 @@ docker exec ai-dba-postgres-test psql -U postgres -d testdb \
 
 Run integration tests:
 ```bash
-npm run test:integration
+node test/integration-all.mjs
 ```
-**Expected:** 49 tests, 0 failures. Tests all connector methods (listDatabases, listTables, describeTable, listIndexes, listProcesses, query, getBlockingChains) against live MySQL 8.0 and PostgreSQL 16.
+**Expected:** 121 tests, 0 failures. Tests all connector methods (listDatabases, listTables, describeTable, listIndexes, listProcesses, query, getBlockingChains) against all 5 live databases.
 
-### 3. Live Blocking Scenario Tests
-
-```bash
-npm run test:blocking
-```
-**Expected:** 21 tests, 0 failures. Creates real row locks on MySQL and table locks on PostgreSQL, then verifies blocking-chains detection returns correct PIDs, queries, wait duration, and database names.
-
-### 4. CLI Smoke Tests
+### 3. CLI Smoke Tests
 
 ```bash
 # Version
@@ -85,17 +77,14 @@ node dist/index.js --version
 
 # List engines (uses config.yaml.example)
 node dist/index.js --config config.yaml.example list-engines
-# Expected: Table with mysql-test and postgres-test rows, PostgreSQL URL properly masked
+# Expected: Table with all 5 engines, URLs properly masked
 
 # Blocking chains (no active blocks)
 node dist/index.js --config config.yaml blocking-chains mysql-test
 # Expected: "No blocking chains found on mysql-test"
-
-node dist/index.js --config config.yaml blocking-chains postgres-test
-# Expected: "No blocking chains found on postgres-test"
 ```
 
-### 5. REPL Smoke Test
+### 4. REPL Smoke Test
 
 ```bash
 node dist/index.js --config config.yaml repl
@@ -104,7 +93,7 @@ node dist/index.js --config config.yaml repl
 Type these commands and verify output:
 ```
 help              — shows command list
-engines           — table with both engines, * on current
+engines           — table with all engines, * on current
 use postgres-test  — "Switched to postgres-test"
 databases         — table with testdb, postgres, etc.
 tables            — table with blocking_test
@@ -115,7 +104,7 @@ blocking-chains   — "No blocking chains."
 quit              — "Bye."
 ```
 
-### 6. MCP Server Smoke Test
+### 5. MCP Server Smoke Test
 
 ```bash
 echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | timeout 5 node dist/index.js --config config.yaml serve 2>/dev/null
@@ -126,17 +115,17 @@ echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | timeout 5 node dist/inde
 
 ## Sprint 4 — SQL Server
 
-**Status:** PLANNED
-**Driver:** `tedious` (raw driver, matches existing pattern of using mysql2/pg directly)
+**Status:** MERGED (PR #11)
+**Driver:** `tedious` (raw driver, promise-based wrapper)
 **Docker image:** `mcr.microsoft.com/mssql/server:2022-latest`
 **Port:** 11433 (host) → 1433 (container)
 
 ### Prerequisites
 
 - Docker with 2+ GB RAM available for SQL Server container
-- `npm install tedious` (will be done during sprint implementation)
+- `npm install` includes `tedious` (already in package.json)
 
-### Docker Setup (will be added to docker-compose.yml)
+### Docker Setup (in docker-compose.yml)
 
 ```yaml
   sqlserver-test:
@@ -147,16 +136,16 @@ echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | timeout 5 node dist/inde
       - "11433:1433"
     environment:
       ACCEPT_EULA: "Y"
-      SA_PASSWORD: "TestPassword123!"
+      MSSQL_SA_PASSWORD: "TestPassword123!"
       MSSQL_PID: "Express"
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -Q 'SELECT 1'"]
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -C -Q 'SELECT 1' || /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -Q 'SELECT 1'"]
       interval: 10s
       timeout: 5s
       retries: 10
 ```
 
-### Config (will be added to config.yaml)
+### Config (in config.yaml.example)
 
 ```yaml
   sqlserver-test:
@@ -166,35 +155,38 @@ echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | timeout 5 node dist/inde
 
 ### Manual Test Procedure
 
-**Step 1: Start containers**
+**Step 1: Start container**
 ```bash
-docker compose up -d
+docker compose up -d sqlserver-test
 docker inspect --format='{{.State.Health.Status}}' ai-dba-sqlserver-test
 # Wait for "healthy" — SQL Server takes 20-30s to initialize
 ```
 
 **Step 2: Create test database and table**
 ```bash
-docker exec ai-dba-sqlserver-test /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' \
-  -Q "CREATE DATABASE testdb; USE testdb; CREATE TABLE blocking_test (id INT IDENTITY(1,1) PRIMARY KEY, name NVARCHAR(100), value INT); INSERT INTO blocking_test (name, value) VALUES ('alpha',1),('beta',2),('gamma',3);"
+docker exec ai-dba-sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -C \
+  -Q "IF DB_ID('testdb') IS NULL CREATE DATABASE testdb"
+
+docker exec ai-dba-sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -C -d testdb \
+  -Q "IF OBJECT_ID('blocking_test','U') IS NULL CREATE TABLE blocking_test (id INT IDENTITY(1,1) PRIMARY KEY, name NVARCHAR(100), value INT); IF NOT EXISTS (SELECT 1 FROM blocking_test) INSERT INTO blocking_test (name, value) VALUES ('alpha',1),('beta',2),('gamma',3);"
 ```
 
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 8+ test files, 30+ tests (existing 27 + new SQL Server tests)
+# Expected: 10 test files, 39 tests (includes 4 SQL Server URL parser tests)
 ```
 
 **Step 4: Run integration tests**
 ```bash
-npm run test:integration
-# Expected: 60+ tests (existing 49 + new SQL Server tests)
+node test/integration-all.mjs
+# Expected: 121 tests total, 0 failures (includes 24 SQL Server tests)
 ```
 
 **Step 5: CLI tests**
 ```bash
 node dist/index.js --config config.yaml list-engines
-# Expected: 3 engines (mysql-test, postgres-test, sqlserver-test)
+# Expected: 5 engines including sqlserver-test
 
 node dist/index.js --config config.yaml blocking-chains sqlserver-test
 # Expected: "No blocking chains found on sqlserver-test"
@@ -207,9 +199,9 @@ node dist/index.js --config config.yaml repl
 use sqlserver-test
 databases         — should list testdb, master, tempdb, model, msdb
 tables            — should list blocking_test
-describe blocking_test — columns: id (INT, PRI, IDENTITY), name (NVARCHAR), value (INT)
-indexes blocking_test  — PRIMARY key index on id
-processes         — active connections
+describe blocking_test — columns: id (int, PRI, IDENTITY), name (nvarchar), value (int)
+indexes blocking_test  — PRIMARY key index on id (CLUSTERED, UNIQUE)
+processes         — active user connections (system processes filtered out)
 blocking-chains   — no chains
 sql SELECT @@VERSION — should return SQL Server 2022 version string
 ```
@@ -219,12 +211,12 @@ sql SELECT @@VERSION — should return SQL Server 2022 version string
 Open two SQL Server sessions:
 ```bash
 # Session 1 — hold lock
-docker exec -i ai-dba-sqlserver-test /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' \
-  -Q "USE testdb; BEGIN TRAN; UPDATE blocking_test SET value=999 WHERE id=1; WAITFOR DELAY '00:00:15'; ROLLBACK TRAN;"
+docker exec -i ai-dba-sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -C -d testdb \
+  -Q "BEGIN TRAN; UPDATE blocking_test SET value=999 WHERE id=1; WAITFOR DELAY '00:00:15'; ROLLBACK TRAN;"
 
 # Session 2 (in another terminal, immediately) — blocked
-docker exec -i ai-dba-sqlserver-test /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' \
-  -Q "USE testdb; UPDATE blocking_test SET value=888 WHERE id=1;"
+docker exec -i ai-dba-sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'TestPassword123!' -C -d testdb \
+  -Q "UPDATE blocking_test SET value=888 WHERE id=1;"
 ```
 
 While both sessions are active, run:
@@ -260,6 +252,13 @@ echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"databases","argum
 ```
 **Expected:** JSON with databases array containing testdb, master, tempdb, model, msdb.
 
+### Known Issues
+
+- **No connection pooling:** Each connector method creates a new TCP connection. This is a known limitation — the `TediousConnection` wrapper opens/closes per call.
+- **tedious type definitions:** The `.d.ts` for tedious doesn't expose `columnMetadata`/`row` as typed events. The connector casts through `any` to subscribe.
+- **System processes filtered:** `listProcesses` filters to `session_id >= 50 AND is_user_process = 1` to exclude system sessions.
+- **sqlcmd path:** SQL Server 2022 uses `/opt/mssql-tools18/bin/sqlcmd` (with `-C` flag for trust cert). Older images use `/opt/mssql-tools/bin/sqlcmd` (no `-C` flag). The healthcheck tries both.
+
 ### Troubleshooting
 
 - **Container won't start:** SQL Server needs 2+ GB RAM. Check `docker stats`. On WSL, ensure WSL2 memory limit is high enough.
@@ -271,18 +270,18 @@ echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"databases","argum
 
 ## Sprint 5 — Oracle
 
-**Status:** PLANNED
-**Driver:** `oracledb` (node-oracledb thin mode — no Oracle client needed)
-**Docker image:** `gvenzl/oracle-xe:21-slim` (smaller than official Oracle image)
+**Status:** MERGED (PR #12)
+**Driver:** `oracledb` (thin mode — no Oracle Instant Client needed)
+**Docker image:** `gvenzl/oracle-xe:21-slim`
 **Port:** 11521 (host) → 1521 (container)
 
 ### Prerequisites
 
 - Docker with 2+ GB RAM for Oracle XE
-- `npm install oracledb` (thin mode — no Oracle Instant Client needed)
+- `npm install` includes `oracledb` (already in package.json)
 - Oracle XE license: free for development/education
 
-### Docker Setup (will be added to docker-compose.yml)
+### Docker Setup (in docker-compose.yml)
 
 ```yaml
   oracle-test:
@@ -296,13 +295,13 @@ echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"databases","argum
       APP_USER: testuser
       APP_USER_PASSWORD: testpassword
     healthcheck:
-      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -s testuser/testpassword@localhost:1521/XEPDB1"]
+      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -s testuser/testpassword@localhost:1521/XEPDB1 2>/dev/null | grep -q '1'"]
       interval: 15s
       timeout: 10s
       retries: 10
 ```
 
-### Config (will be added to config.yaml)
+### Config (in config.yaml.example)
 
 ```yaml
   oracle-test:
@@ -312,42 +311,34 @@ echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"databases","argum
 
 ### Manual Test Procedure
 
-**Step 1: Start containers**
+**Step 1: Start container**
 ```bash
-docker compose up -d
+docker compose up -d oracle-test
 docker inspect --format='{{.State.Health.Status}}' ai-dba-oracle-test
 # Wait for "healthy" — Oracle XE takes 30-60s to initialize
 ```
 
 **Step 2: Create test table**
 ```bash
-docker exec ai-dba-oracle-test sqlplus testuser/testpassword@localhost:1521/XEPDB1 << 'SQL'
-CREATE TABLE blocking_test (
-  id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  name VARCHAR2(100),
-  value NUMBER
-);
-INSERT INTO blocking_test (name, value) VALUES ('alpha',1), ('beta',2), ('gamma',3);
-COMMIT;
-SQL
+docker exec ai-dba-oracle-test bash -c "echo 'CREATE TABLE blocking_test (id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, name VARCHAR2(100), value NUMBER); INSERT INTO blocking_test (name, value) VALUES ('\''alpha'\'',1), ('\''beta'\'',2), ('\''gamma'\'',3); COMMIT;' | sqlplus -s testuser/testpassword@localhost:1521/XEPDB1"
 ```
 
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 9+ test files, 34+ tests
+# Expected: 10 test files, 39 tests (includes 4 Oracle URL parser tests)
 ```
 
 **Step 4: Run integration tests**
 ```bash
-npm run test:integration
-# Expected: 70+ tests
+node test/integration-all.mjs
+# Expected: 121 tests total, 0 failures (includes 24 Oracle tests)
 ```
 
 **Step 5: CLI tests**
 ```bash
 node dist/index.js --config config.yaml list-engines
-# Expected: 4 engines including oracle-test
+# Expected: 5 engines including oracle-test
 
 node dist/index.js --config config.yaml blocking-chains oracle-test
 # Expected: "No blocking chains found on oracle-test"
@@ -357,30 +348,31 @@ node dist/index.js --config config.yaml blocking-chains oracle-test
 ```bash
 node dist/index.js --config config.yaml repl
 use oracle-test
-databases         — should list schemas (TESTUSER, SYS, SYSTEM, etc.)
+databases         — should list schemas/users (TESTUSER, SYS, SYSTEM, etc.)
 tables            — should list BLOCKING_TEST
 describe BLOCKING_TEST — columns: ID (NUMBER, PRI, IDENTITY), NAME (VARCHAR2), VALUE (NUMBER)
 indexes BLOCKING_TEST  — SYS_C* primary key index
-processes         — active sessions
-blocking-chains   — no chains
-sql SELECT * FROM v$version — should return Oracle 21c version
+processes         — active sessions (empty if no SELECT ANY DICTIONARY privilege)
+blocking-chains   — no chains (empty if no SELECT ANY DICTIONARY privilege)
+sql SELECT * FROM v$version — should return Oracle 21c version (requires SELECT ANY DICTIONARY)
 ```
 
 **Step 7: Blocking scenario test**
 
+Requires SELECT ANY DICTIONARY privilege for the testuser:
+```bash
+docker exec ai-dba-oracle-test bash -c "echo 'GRANT SELECT ANY DICTIONARY TO testuser;' | sqlplus -s / as sysdba"
+```
+
 ```bash
 # Session 1 — hold lock
-docker exec -i ai-dba-oracle-test sqlplus testuser/testpassword@localhost:1521/XEPDB1 << 'SQL'
-SET AUTOCOMMIT OFF
-UPDATE blocking_test SET value=999 WHERE id=1;
--- Don't commit — lock held
-SQL &
+docker exec -i ai-dba-oracle-test bash -c "echo 'SET AUTOCOMMIT OFF
+UPDATE blocking_test SET value=999 WHERE id=1;' | sqlplus -s testuser/testpassword@localhost:1521/XEPDB1 &"
 
 sleep 3
 
 # Session 2 — blocked
-docker exec -i ai-dba-oracle-test sqlplus testuser/testpassword@localhost:1521/XEPDB1 \
-  -L "UPDATE blocking_test SET value=888 WHERE id=1;" &
+docker exec -i ai-dba-oracle-test bash -c "echo 'UPDATE blocking_test SET value=888 WHERE id=1;' | sqlplus -s testuser/testpassword@localhost:1521/XEPDB1 &"
 
 sleep 3
 ```
@@ -401,40 +393,47 @@ node dist/index.js --config config.yaml blocking-chains oracle-test --json
     "wait_event": "enq: TX - row lock contention",
     "blocking_query": "UPDATE blocking_test SET value=999 WHERE id=1",
     "blocked_query": "UPDATE blocking_test SET value=888 WHERE id=1",
-    "database_name": "XEPDB1",
+    "database_name": "TESTUSER",
     "wait_type": "enq",
     "status": "ACTIVE",
     "host_name": "<hostname>",
     "program_name": "sqlplus",
-    "login_time": "<timestamp>"
+    "login_time": null
   }],
   "count": 1
 }
 ```
+
+### Known Issues
+
+- **v$ permission fallback:** `listProcesses` and `getBlockingChains` require SELECT ANY DICTIONARY. Without it, they return empty arrays (ORA-00942/ORA-01031 caught gracefully). Grant with: `GRANT SELECT ANY DICTIONARY TO testuser;`
+- **Bind variable names:** `:table` is a reserved bind variable in oracledb. The connector uses `:tbl` instead. Column aliases (`AS name`) also conflict — the connector uses positional indexing (row[0], row[1], etc.).
+- **Uppercase identifiers:** Oracle stores identifiers in uppercase by default. Table names, column names, and index names come back uppercase. The integration test assertions handle both cases.
+- **user_objects vs all_objects:** `user_objects` has no `OWNER` column. The connector uses `USER AS schema` for the default case and `all_objects` (which has `OWNER`) for schema-filtered queries.
+- **Thin mode:** oracledb thin mode (default in v6+) doesn't need Oracle Instant Client. If thick mode is needed, install Instant Client and call `oracledb.initOracleClient()`.
 
 ### Troubleshooting
 
 - **Oracle XE slow startup:** 30-60s is normal. Health check has retries: 10.
 - **ORA-12541:** Listener not ready yet. Wait longer.
 - **ORA-01017:** Invalid credentials. Check ORACLE_PASSWORD / APP_USER_PASSWORD.
-- **Thin mode vs thick mode:** oracledb thin mode (default in v6+) doesn't need Oracle Instant Client. If thick mode is needed, install Instant Client and call `oracledb.initOracleClient()`.
-- **Table names uppercase:** Oracle stores identifiers in uppercase. Use `BLOCKING_TEST` not `blocking_test` in queries.
+- **ORA-00942 on v$ views:** Needs SELECT ANY DICTIONARY. Grant it or accept empty results.
 
 ---
 
 ## Sprint 6 — MongoDB
 
-**Status:** PLANNED
-**Driver:** `mongodb` (official Node.js driver)
+**Status:** MERGED (PR #13)
+**Driver:** `mongodb` (official Node.js driver, ESM-native)
 **Docker image:** `mongo:7`
 **Port:** 12017 (host) → 27017 (container)
 
 ### Prerequisites
 
 - Docker
-- `npm install mongodb`
+- `npm install` includes `mongodb` (already in package.json)
 
-### Docker Setup (will be added to docker-compose.yml)
+### Docker Setup (in docker-compose.yml)
 
 ```yaml
   mongodb-test:
@@ -448,13 +447,13 @@ node dist/index.js --config config.yaml blocking-chains oracle-test --json
       MONGO_INITDB_ROOT_PASSWORD: testpassword
       MONGO_INITDB_DATABASE: testdb
     healthcheck:
-      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ping:1})'"]
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.runCommand({ping:1}).ok' | grep -q '1'"]
       interval: 10s
       timeout: 5s
       retries: 5
 ```
 
-### Config (will be added to config.yaml)
+### Config (in config.yaml.example)
 
 ```yaml
   mongodb-test:
@@ -464,35 +463,29 @@ node dist/index.js --config config.yaml blocking-chains oracle-test --json
 
 ### Manual Test Procedure
 
-**Step 1: Start containers**
+**Step 1: Start container**
 ```bash
-docker compose up -d
+docker compose up -d mongodb-test
 docker inspect --format='{{.State.Health.Status}}' ai-dba-mongodb-test
 # Wait for "healthy"
 ```
 
 **Step 2: Create test data**
 ```bash
-docker exec ai-dba-mongodb-test mongosh testdb --eval '
-db.blocking_test.insertMany([
-  { name: "alpha", value: 1 },
-  { name: "beta", value: 2 },
-  { name: "gamma", value: 3 }
-]);
-db.blocking_test.createIndex({ name: 1 }, { unique: true });
-'
+docker exec ai-dba-mongodb-test mongosh "mongodb://testuser:testpassword@127.0.0.1:27017/testdb?authSource=admin" --quiet --eval 'db.blocking_test.deleteMany({}); db.blocking_test.insertMany([{name:"alpha",value:1},{name:"beta",value:2},{name:"gamma",value:3}]); db.blocking_test.countDocuments()'
+# Expected: 3
 ```
 
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 10+ test files, 38+ tests
+# Expected: 10 test files, 39 tests (includes 4 MongoDB URL parser tests)
 ```
 
 **Step 4: Run integration tests**
 ```bash
-npm run test:integration
-# Expected: 85+ tests
+node test/integration-all.mjs
+# Expected: 121 tests total, 0 failures (includes 24 MongoDB tests)
 ```
 
 **Step 5: CLI tests**
@@ -510,20 +503,38 @@ node dist/index.js --config config.yaml repl
 use mongodb-test
 databases         — should list testdb, admin, config, local
 tables            — should list collections: blocking_test
-describe blocking_test — field info (name: String, value: Int32, _id: ObjectId)
-indexes blocking_test  — _id_ index, name_1 unique index
+describe blocking_test — field info: _id (ObjectId, PRI), name (string), value (number)
+indexes blocking_test  — _id_ index (UNIQUE, PRIMARY)
 processes         — active connections/ops
 blocking-chains   — no chains (or long-running ops if any)
-sql { ping: 1 }   — should return { ok: 1 } (MongoDB-specific query support)
 ```
 
-**Step 7: Blocking/long-running ops scenario**
+**Step 7: Query via JSON command documents**
+
+MongoDB `query()` accepts JSON command documents instead of SQL:
+```bash
+node dist/index.js --config config.yaml repl
+use mongodb-test
+# Find documents
+sql {"find": "blocking_test", "filter": {}, "limit": 1}
+
+# Count documents
+sql {"count": "blocking_test", "filter": {}}
+
+# Distinct values
+sql {"distinct": "blocking_test", "field": "name", "filter": {}}
+
+# Ping
+sql {"ping": 1}
+```
+
+**Step 8: Blocking/long-running ops scenario**
 
 MongoDB doesn't have traditional row locks like SQL databases. Instead, test long-running operations:
 
 ```bash
 # Start a long-running operation in one session
-docker exec ai-dba-mongodb-test mongosh testdb --eval '
+docker exec ai-dba-mongodb-test mongosh "mongodb://testuser:testpassword@127.0.0.1:27017/testdb?authSource=admin" --eval '
 db.blocking_test.find({ $where: "sleep(15000) || true" }).toArray();
 ' &
 
@@ -535,73 +546,18 @@ node dist/index.js --config config.yaml blocking-chains mongodb-test --json
 
 **Expected:** JSON with long-running op info (opid, secs_running, command, client).
 
-### Troubleshooting
+### Known Issues
 
-- **MongoDB "blocking" is different:** MongoDB uses document-level locking (WiredTiger) and doesn't have traditional blocking chains. The connector will report long-running operations via `db.currentOp()` instead.
-- **Auth failures:** Use `authSource=admin` in the URL when connecting to admin user.
-- **describe-table limitations:** MongoDB is schemaless. The connector will infer types from a sample of documents, not from a schema definition.
-
----
-
-## Sprint 7 — Docs Site
-
-**Status:** PLANNED
-**Tool:** MkDocs Material (simpler than Docusaurus, no Node build needed, Python-based)
-
-### Prerequisites
-
-- Python 3 with pip
-- `pip install mkdocs mkdocs-material`
-
-### Manual Test Procedure
-
-**Step 1: Build site**
-```bash
-cd /mnt/d/ai-dba
-mkdocs serve
-# Open http://127.0.0.1:8000
-```
-
-**Step 2: Verify pages**
-
-| Page | Content to verify |
-|------|-------------------|
-| Home | Project overview, quick start |
-| Getting Started | Install, build, first connection |
-| CLI Reference | All commands with examples |
-| REPL Reference | All REPL commands + aliases |
-| MCP Integration | Tool list, config examples for Hermes/Claude/Cursor |
-| Connectors | MySQL, PostgreSQL, SQL Server, Oracle, MongoDB sections |
-| Blocking Chains | How detection works per engine, field mappings |
-| Configuration | YAML format, URL formats, individual fields |
-| API Reference | DatabaseConnector interface, types |
-| Testing | Unit tests, integration tests, blocking tests |
-
-**Step 3: Verify navigation**
-
-- Sidebar collapses/expands correctly
-- Search works (type "blocking" — should show blocking chains page)
-- Dark/light mode toggle
-- Mobile responsive (resize browser to phone width)
-- Code blocks have copy buttons
-
-**Step 4: Build static site**
-```bash
-mkdocs build --strict
-# Expected: no warnings, site/ directory created
-```
-
-**Step 5: Deploy (optional)**
-```bash
-mkdocs gh-deploy
-# Deploys to https://steveramos21.github.io/ai-dba/
-```
+- **Schema inference is sampled:** `describeTable` infers types from up to 100 sampled documents. If the collection is empty, only `_id` is returned.
+- **`_id_` index uniqueness:** MongoDB's default `_id_` index doesn't set `unique: true` in the `listIndexes()` result. The connector checks `idx.name === "_id_"` as a fallback for uniqueness.
+- **JSON command API:** `query()` accepts JSON command documents (find, aggregate, count, distinct, ping) instead of SQL. Read-only guard allows only these operations.
+- **currentOp privileges:** `listProcesses` and `getBlockingChains` use `db.currentOp()` which may require the `clusterMonitor` or `root` role.
 
 ### Troubleshooting
 
-- **mkdocs not found:** `pip install mkdocs mkdocs-material`
-- **Build warnings:** Run with `--strict` — any broken links or missing images will fail
-- **Python not available on Windows host:** Run mkdocs from WSL
+- **MongoDB "blocking" is different:** MongoDB uses document-level locking (WiredTiger) and doesn't have traditional blocking chains. The connector reports long-running operations via `db.currentOp()` instead.
+- **Auth failures:** Use `authSource=admin` in the URL when connecting to the root user.
+- **mongosh auth format:** Use the full connection URI: `mongosh "mongodb://testuser:testpassword@127.0.0.1:27017/testdb?authSource=admin"`. Don't use bare `mongosh testdb` — auth will fail.
 
 ---
 
@@ -612,15 +568,15 @@ Run this checklist after all sprints are merged:
 ### Pre-flight
 - [ ] `npm install` — no errors
 - [ ] `npm run build` — TypeScript compiles, 0 errors
-- [ ] `npm test` — all unit tests pass
-- [ ] `docker compose up -d` — all 5 containers healthy (MySQL, PostgreSQL, SQL Server, Oracle, MongoDB)
+- [ ] `npm test` — 39 unit tests pass
+- [ ] `docker compose up -d` — all 5 containers healthy (MySQL 13306, PostgreSQL 15432, SQL Server 11433, Oracle 11521, MongoDB 12017)
 
 ### Per-engine verification
 For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb-test):
 
 - [ ] `list-engines` shows the engine with correct host/port
 - [ ] REPL `databases` returns expected databases
-- [ ] REPL `tables` returns blocking_test table
+- [ ] REPL `tables` returns blocking_test table/collection
 - [ ] REPL `describe blocking_test` returns columns with correct types
 - [ ] REPL `indexes blocking_test` returns primary key index
 - [ ] REPL `processes` returns active connections
@@ -636,12 +592,11 @@ For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb
 - [ ] MySQL — row lock detected, correct PIDs, queries, wait time
 - [ ] PostgreSQL — table lock detected, correct PIDs, queries, wait event
 - [ ] SQL Server — row lock detected, wait_type = LCK_M_X
-- [ ] Oracle — row lock detected, wait_event = enq: TX - row lock contention
+- [ ] Oracle — row lock detected, wait_event = enq: TX - row lock contention (requires SELECT ANY DICTIONARY)
 - [ ] MongoDB — long-running op detected (if applicable)
 
 ### Integration tests
-- [ ] `npm run test:integration` — all tests pass
-- [ ] `npm run test:blocking` — all blocking scenario tests pass
+- [ ] `node test/integration-all.mjs` — 121 tests pass
 
 ### MCP server
 - [ ] `tools/list` returns 6 tools
@@ -649,14 +604,3 @@ For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb
 - [ ] Unknown engineId returns error
 - [ ] Unsupported engine type returns error
 - [ ] Connector errors are propagated as error responses
-
-### CI
-- [ ] GitHub Actions CI runs on push
-- [ ] Build + unit tests pass on Node 20 and 22
-- [ ] CLI entry point verification passes
-
-### Documentation
-- [ ] MkDocs site builds with `--strict`
-- [ ] All pages render correctly
-- [ ] Search works
-- [ ] Code examples are accurate and copy-pasteable
