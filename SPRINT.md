@@ -260,3 +260,94 @@ npm test            — run Vitest tests
 - MkDocs Material 9.7.6 on Python 3.12 (venv at `.venv/`)
 - 3 anchor link mismatches in testing-guide.md (em-dash vs hyphen) — fixed
 - Material for MkDocs deprecation warning (MkDocs 2.0 future notice) — informational only, not a blocker
+
+---
+
+## Sprint 8 — Query Performance & Health (COMPLETE)
+
+**Goal**: Move from passive inspection to active diagnostics — explain plans, slow queries, table sizes, and health checks.
+
+### Completed Items
+
+#### table-sizes (COMPLETE)
+- `TableSizeInfo` type in `connector.ts` — `name`, `rows`, `dataSizeBytes`, `indexSizeBytes`, `totalSizeBytes`, `dataFreeBytes`, `comment`
+- `listTableSizes()` method on `DatabaseConnector` interface
+- All 5 connectors implemented:
+  - MySQL: `INFORMATION_SCHEMA.TABLES` (DATA_LENGTH + INDEX_LENGTH + DATA_FREE)
+  - PostgreSQL: `pg_relation_size` + `pg_indexes_size` + `pg_total_relation_size`
+  - SQL Server: `sys.allocation_units` + `sys.partitions` (with identifier validation)
+  - Oracle: `user_segments`/`all_segments` (TABLE + INDEX segments grouped)
+  - MongoDB: `collStats` command per collection
+- MCP tool `table-sizes` with optional `database` parameter
+- CLI: `table-sizes <engineId> [database]`
+- REPL: `table-sizes` command with alias `ts`
+- `formatBytes()` helper for human-readable size display
+- 4 unit tests (happy path, database param, unknown engine, error propagation)
+
+#### explain (COMPLETE)
+- `ExplainResult` type in `connector.ts` — `plan`, `format` (json/text/xml), `estimatedCost`, `estimatedRows`, `analyzed`
+- `ExplainOptions` type — `analyze` flag (PostgreSQL EXPLAIN ANALYZE)
+- `explainQuery()` method on `DatabaseConnector` interface
+- All 5 connectors implemented:
+  - MySQL: `EXPLAIN FORMAT=JSON` (analyze flag silently ignored — MySQL doesn't support EXPLAIN ANALYZE)
+  - PostgreSQL: `EXPLAIN (FORMAT JSON[, ANALYZE, BUFFERS])` — analyze flag actually executes the query
+  - SQL Server: `SET SHOWPLAN_XML ON` → run query → `SET SHOWPLAN_XML OFF` (returns XML plan)
+  - Oracle: `EXPLAIN PLAN SET STATEMENT_ID = ...` + `DBMS_XPLAN.DISPLAY()` + cleanup (unique statement ID per call for concurrency safety)
+  - MongoDB: `explain` command with `queryPlanner` or `executionStats` verbosity
+- `sql-guard.ts` shared validation module:
+  - `validateReadOnlySql()` — guards REPL `sql` command (replaces inline connector guards)
+  - `validateExplainQuery()` — stricter guard for explain (SELECT/WITH only, destructive keyword scan with `\b` word boundaries)
+  - `isJsonCommand()` — detects MongoDB JSON command documents
+- MCP tool `explain` with `analyze` parameter — validates input before calling connector
+- CLI: `explain <engineId> <query>` with `-a, --analyze` flag
+- REPL: `explain` command with alias `exp`
+- 20 sql-guard tests + 4 explain tool tests
+
+### Remaining Items
+
+_None — all Sprint 8 features are complete._
+
+#### slow-queries (COMPLETE)
+- `SlowQueryInfo` type in `connector.ts` — `id`, `query`, `database`, `executionCount`, `totalExecutionTimeMs`, `avgExecutionTimeMs`, `maxExecutionTimeMs`, `rowsExamined`, `rowsReturned`, `firstSeen`, `lastSeen`
+- `SlowQueryOptions` type — `limit`, `minDurationMs`
+- `listSlowQueries()` method on `DatabaseConnector` interface
+- All 5 connectors implemented (all time units normalized to milliseconds):
+  - MySQL: `performance_schema.events_statements_summary_by_digest` (picoseconds ÷ 1,000,000,000 → ms). Graceful empty on `performance_schema` disabled or access denied.
+  - PostgreSQL: `pg_stat_statements` (already in ms). Graceful empty if extension not installed (`42P01`) or permission denied (`42501`).
+  - SQL Server: `sys.dm_exec_query_stats` + `sys.dm_exec_sql_text` (microseconds ÷ 1,000 → ms). `NULLIF(execution_count, 0)` guard. Graceful empty if `VIEW SERVER STATE` denied.
+  - Oracle: `V$SQLAREA` (microseconds ÷ 1,000 → ms). Positional binds (`:1`, `:2`) for oracledb compatibility. Graceful empty on `ORA-00942` / `ORA-01031`.
+  - MongoDB: `currentOp` with `secs_running` filter — shows currently running ops only (fundamental MongoDB limitation; no historical slow query log).
+- `formatDuration()` helper for human-readable time display in CLI/REPL
+- MCP tool `slow-queries` with `limit` and `minDurationMs` parameters
+- CLI: `slow-queries <engineId>` with `--limit` and `--min-duration-ms` flags
+- REPL: `slow-queries` command with alias `sq`
+- 4 unit tests (happy path, options passthrough, unknown engine, error propagation)
+
+#### health-check (COMPLETE)
+- `HealthCheck` type in `connector.ts` — `name`, `status` (pass/warn/fail/skip), `message`, `value`
+- `HealthCheckResult` type — `status` (healthy/warning/critical), `engineId`, `engineType`, `checks[]`, `timestamp`
+- **No new connector method** — pure tool-level orchestration reusing existing `query()`, `getBlockingChains()`, `listProcesses()`, `listSlowQueries()` methods
+- 4 checks per engine:
+  1. **Connectivity** — `SELECT 1` (or `SELECT 1 FROM DUAL` for Oracle, `{ping: 1}` for MongoDB). Fail = critical.
+  2. **Blocking chains** — reuses `getBlockingChains()`. Any chains = critical.
+  3. **Active processes** — reuses `listProcesses()`. >50 processes = warning.
+  4. **Slow queries** — reuses `listSlowQueries()` with `limit: 5, minDurationMs: 1000`. Any found = warning.
+- Aggregation: any `fail` → critical; any `warn` → warning; all `pass` → healthy. `skip` doesn't affect status.
+- MCP tool `health-check` with `engineId` parameter
+- CLI: `health-check <engineId>` with color-coded status table
+- REPL: `health-check` command with alias `hc`
+- 4 unit tests (all pass, blocking = critical, slow queries = warning, unknown engine)
+
+### Final Test Results
+- **75 unit tests** across **15 test files**, all passing
+- Build clean (`tsc` no errors)
+- 10 MCP tools registered: `blocking-chains`, `databases`, `tables`, `describe-table`, `indexes`, `processes`, `table-sizes`, `explain`, `slow-queries`, `health-check`
+- 10 CLI commands, 10 REPL commands (with aliases: `bc`, `ls`, `db`, `dt`, `desc`, `idx`, `ps`, `ts`, `exp`, `sq`, `hc`)
+
+### Bugs Fixed During Implementation
+- **MySQL time units**: `performance_schema` timers are picoseconds — fixed divisor from 1,000,000 to 1,000,000,000
+- **Oracle bind variables**: named binds (`:owner`, `:minUs`, `:maxRows`) → positional (`:1`, `:2`) for oracledb driver compatibility
+- **SQL Server divide-by-zero**: `NULLIF(qs.execution_count, 0)` guard on avg time calculation
+- **SQL Server identifier validation**: regex check before string interpolation to prevent injection
+- **MongoDB `explainQuery`**: restored accidentally deleted `try {` block
+- **sql-guard word boundaries**: `\\b` regex instead of space-delimited matching — catches `DELETE FROM x` embedded in SELECT clauses

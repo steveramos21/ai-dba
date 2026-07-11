@@ -4,11 +4,16 @@ import type {
   DatabaseConnector,
   DatabaseInfo,
   TableInfo,
+  TableSizeInfo,
   ColumnInfo,
   IndexInfo,
   ProcessInfo,
   QueryResult,
   BlockingChain,
+  ExplainResult,
+  ExplainOptions,
+  SlowQueryInfo,
+  SlowQueryOptions,
 } from "../connector.js";
 
 /**
@@ -197,6 +202,152 @@ export class OracleConnector implements DatabaseConnector {
         isPrimary: i.isPrimary,
         type: i.isUnique ? "UNIQUE" : "BTREE",
       }));
+    } finally {
+      await conn.close();
+    }
+  }
+
+  async listTableSizes(engineId: string, config: EngineConfig, database?: string): Promise<TableSizeInfo[]> {
+    const pool = await this.getPool(engineId, config);
+    const conn = await pool.getConnection();
+    try {
+      let result;
+      if (database) {
+        // Filter by schema — use all_segments for cross-schema
+        const owner = database.toUpperCase();
+        result = await conn.execute(
+          `SELECT
+            segment_name AS name,
+            SUM(CASE WHEN segment_type = 'TABLE' THEN bytes ELSE 0 END) AS data_bytes,
+            SUM(CASE WHEN segment_type = 'INDEX' THEN bytes ELSE 0 END) AS index_bytes,
+            SUM(bytes) AS total_bytes
+          FROM all_segments
+          WHERE segment_type IN ('TABLE','INDEX') AND owner = :1
+          GROUP BY segment_name
+          ORDER BY SUM(bytes) DESC`,
+          [owner]
+        );
+      } else {
+        // Current user's tables — user_segments (no DBA privilege needed)
+        result = await conn.execute(
+          `SELECT
+            segment_name AS name,
+            SUM(CASE WHEN segment_type = 'TABLE' THEN bytes ELSE 0 END) AS data_bytes,
+            SUM(CASE WHEN segment_type = 'INDEX' THEN bytes ELSE 0 END) AS index_bytes,
+            SUM(bytes) AS total_bytes
+          FROM user_segments
+          WHERE segment_type IN ('TABLE','INDEX')
+          GROUP BY segment_name
+          ORDER BY SUM(bytes) DESC`
+        );
+      }
+      const rows = result.rows || [];
+      return rows.map((row: any) => ({
+        name: row[0],
+        dataSizeBytes: Number(row[1]),
+        indexSizeBytes: Number(row[2]),
+        totalSizeBytes: Number(row[3]),
+      }));
+    } catch (e: any) {
+      if (e.message?.includes("ORA-00942") || e.message?.includes("ORA-01031")) {
+        return [];
+      }
+      throw e;
+    } finally {
+      await conn.close();
+    }
+  }
+
+  async explainQuery(engineId: string, config: EngineConfig, query: string, _options?: ExplainOptions): Promise<ExplainResult> {
+    const pool = await this.getPool(engineId, config);
+    const conn = await pool.getConnection();
+    const stmtId = `ai_dba_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    try {
+      // Step 1: Run EXPLAIN PLAN
+      await conn.execute(
+        `EXPLAIN PLAN SET STATEMENT_ID = '${stmtId}' FOR ${query}`,
+        []
+      );
+      // Step 2: Read the plan via DBMS_XPLAN
+      let plan = "";
+      try {
+        const result = await conn.execute(
+          `SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY(NULL, '${stmtId}'))`,
+          []
+        );
+        const rows = result.rows || [];
+        plan = rows.map((r: any) => r[0]).join("\n");
+      } catch {
+        // DBMS_XPLAN might not be available — fallback to plan_table
+        const result = await conn.execute(
+          `SELECT
+            LPAD(' ', LEVEL-1) || operation || ' ' || options || ' ' || object_name AS plan_line
+          FROM plan_table
+          CONNECT BY PRIOR id = parent_id AND statement_id = '${stmtId}'
+          START WITH id = 0 AND statement_id = '${stmtId}'
+          ORDER BY id`,
+          []
+        );
+        const rows = result.rows || [];
+        plan = rows.map((r: any) => r[0]).join("\n");
+      }
+      return { plan, format: "text", analyzed: false };
+    } finally {
+      // Step 3: Clean up — always delete the plan rows
+      try {
+        await conn.execute(
+          `DELETE FROM plan_table WHERE statement_id = '${stmtId}'`,
+          []
+        );
+      } catch {
+        // If plan_table doesn't exist or no rows, ignore
+      }
+      await conn.close();
+    }
+  }
+
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+    const limit = options?.limit ?? 10;
+    const minDurationMs = options?.minDurationMs ?? 1000;
+    const minDurationUs = minDurationMs * 1000;
+    const pool = await this.getPool(engineId, config);
+    const conn = await pool.getConnection();
+    try {
+      // Oracle: V$SQLAREA — elapsed_time is in microseconds
+      const result = await conn.execute(
+        `SELECT
+          sql_id,
+          sql_text,
+          executions       AS exec_count,
+          elapsed_time     AS total_time_us,
+          elapsed_time / NULLIF(executions, 0) AS avg_time_us,
+          max_elapsed_time AS max_time_us,
+          disk_reads,
+          buffer_gets,
+          rows_processed   AS rows_returned
+        FROM v$sqlarea
+        WHERE elapsed_time >= :1
+          AND sql_text IS NOT NULL
+        ORDER BY elapsed_time DESC
+        FETCH FIRST :2 ROWS ONLY`,
+        [minDurationUs, limit]
+      );
+      const rows = result.rows || [];
+      return rows.map((row: any) => ({
+        id: `oracle-${row[0]}`,
+        query: (row[1] ?? "").substring(0, 2000),
+        executionCount: Number(row[2]) || undefined,
+        totalExecutionTimeMs: Math.round(Number(row[3]) / 1000),
+        avgExecutionTimeMs: row[4] ? Math.round(Number(row[4]) / 1000) : undefined,
+        maxExecutionTimeMs: Math.round(Number(row[5]) / 1000),
+        rowsReturned: Number(row[8]) || undefined,
+      }));
+    } catch (e: any) {
+      // V$SQLAREA requires SELECT ANY DICTIONARY — return empty if no permission
+      if (e.message?.includes("ORA-00942") || e.message?.includes("ORA-01031")) {
+        return [];
+      }
+      throw e;
     } finally {
       await conn.close();
     }

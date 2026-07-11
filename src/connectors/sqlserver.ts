@@ -4,11 +4,16 @@ import type {
   DatabaseConnector,
   DatabaseInfo,
   TableInfo,
+  TableSizeInfo,
   ColumnInfo,
   IndexInfo,
   ProcessInfo,
   QueryResult,
   BlockingChain,
+  ExplainResult,
+  ExplainOptions,
+  SlowQueryInfo,
+  SlowQueryOptions,
 } from "../connector.js";
 
 /**
@@ -239,6 +244,96 @@ export class SqlServerConnector implements DatabaseConnector {
       isPrimary: Boolean(row.is_primary_key),
       type: row.index_type,
     }));
+  }
+
+  async listTableSizes(engineId: string, config: EngineConfig, database?: string): Promise<TableSizeInfo[]> {
+    const conn = await this.getConnection(engineId, config);
+    // Validate identifier BEFORE interpolation to prevent SQL injection
+    if (database && !/^[A-Za-z_][A-Za-z0-9_#$]*$/.test(database)) {
+      throw new Error(`Invalid schema name: "${database}" — only alphanumeric characters, underscores, #, and $ are allowed.`);
+    }
+    const schemaFilter = database
+      ? `AND s.name = N'${database.replace(/'/g, "''")}'`
+      : "";
+    const { rows } = await conn.execSql(
+      `SELECT
+        t.name AS table_name,
+        s.name AS schema_name,
+        SUM(p.rows) AS row_count,
+        SUM(a.total_pages) * 8192 AS total_size,
+        SUM(a.used_pages) * 8192 AS used_size,
+        SUM(CASE WHEN a.type = 1 THEN a.data_pages ELSE 0 END) * 8192 AS data_size,
+        SUM(CASE WHEN a.type IN (1,3) THEN a.used_pages - a.data_pages ELSE a.used_pages END) * 8192 AS index_size
+      FROM sys.tables t
+      JOIN sys.schemas s ON t.schema_id = s.schema_id
+      JOIN sys.partitions p ON t.object_id = p.object_id
+      JOIN sys.allocation_units a ON p.partition_id = a.container_id
+      WHERE t.is_ms_shipped = 0 ${schemaFilter}
+      GROUP BY t.name, s.name
+      ORDER BY SUM(a.total_pages) DESC`
+    );
+    return rows.map((row: any) => ({
+      name: row.table_name,
+      schema: row.schema_name,
+      rows: Number(row.row_count),
+      dataSizeBytes: Number(row.data_size ?? 0),
+      indexSizeBytes: Number(row.index_size ?? 0),
+      totalSizeBytes: Number(row.total_size ?? 0),
+    }));
+  }
+
+  async explainQuery(engineId: string, config: EngineConfig, query: string, _options?: ExplainOptions): Promise<ExplainResult> {
+    const conn = await this.getConnection(engineId, config);
+    // SQL Server: SET SHOWPLAN_XML ON, run query (returns XML plan), then SET OFF
+    await conn.execSql("SET SHOWPLAN_XML ON");
+    try {
+      const { rows } = await conn.execSql(query);
+      // SHOWPLAN_XML returns one row with an XML column named "Microsoft SQL Server XML Showplan"
+      const plan = rows[0]?.["Microsoft SQL Server XML Showplan"] ?? JSON.stringify(rows, null, 2);
+      return { plan: String(plan), format: "xml", analyzed: false };
+    } finally {
+      await conn.execSql("SET SHOWPLAN_XML OFF");
+    }
+  }
+
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+    const limit = options?.limit ?? 10;
+    const minDurationMs = options?.minDurationMs ?? 1000;
+    const minDurationUs = Math.round(minDurationMs * 1000);
+    const conn = await this.getConnection(engineId, config);
+    try {
+      // SQL Server: sys.dm_exec_query_stats — total_elapsed_time is in microseconds
+      const { rows } = await conn.execSql(
+        `SELECT TOP ${limit}
+          qs.sql_handle          AS sql_handle,
+          qs.plan_handle         AS plan_handle,
+          qs.execution_count      AS exec_count,
+          qs.total_elapsed_time   AS total_time_us,
+          qs.total_elapsed_time / NULLIF(qs.execution_count, 0) AS avg_time_us,
+          qs.max_elapsed_time     AS max_time_us,
+          qs.total_rows           AS rows_returned,
+          qs.total_logical_reads  AS logical_reads,
+          st.text                 AS query_text,
+          DB_NAME(qs.database_id) AS db_name
+        FROM sys.dm_exec_query_stats qs
+        CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+        WHERE qs.total_elapsed_time >= ${minDurationUs}
+        ORDER BY qs.total_elapsed_time DESC`
+      );
+      return rows.map((row: any, i: number) => ({
+        id: `sqlserver-${i}`,
+        query: (row.query_text ?? "").substring(0, 2000),
+        database: row.db_name ?? undefined,
+        executionCount: Number(row.exec_count),
+        totalExecutionTimeMs: Math.round(Number(row.total_time_us) / 1000),
+        avgExecutionTimeMs: row.avg_time_us != null ? Math.round(Number(row.avg_time_us) / 1000) : undefined,
+        maxExecutionTimeMs: Math.round(Number(row.max_time_us) / 1000),
+        rowsReturned: Number(row.rows_returned) || undefined,
+      }));
+    } catch {
+      // sys.dm_exec_query_stats requires VIEW SERVER STATE — return empty if denied
+      return [];
+    }
   }
 
   async listProcesses(engineId: string, config: EngineConfig): Promise<ProcessInfo[]> {

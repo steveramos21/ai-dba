@@ -56,6 +56,63 @@ export interface QueryResult {
   affectedRows?: number;
 }
 
+export interface TableSizeInfo {
+  name: string;
+  schema?: string;
+  rows?: number;
+  dataSizeBytes?: number;
+  indexSizeBytes?: number;
+  totalSizeBytes: number;
+  dataFreeBytes?: number;
+  comment?: string;
+}
+
+export interface ExplainResult {
+  plan: string;
+  format: "json" | "text" | "xml";
+  estimatedCost?: number;
+  estimatedRows?: number;
+  analyzed: boolean;
+}
+
+export interface ExplainOptions {
+  analyze?: boolean;
+}
+
+export interface SlowQueryInfo {
+  id: string;
+  query: string;
+  database?: string;
+  executionCount?: number;
+  totalExecutionTimeMs: number;
+  avgExecutionTimeMs?: number;
+  maxExecutionTimeMs?: number;
+  rowsExamined?: number;
+  rowsReturned?: number;
+  firstSeen?: string;
+  lastSeen?: string;
+}
+
+export interface SlowQueryOptions {
+  limit?: number;
+  minDurationMs?: number;
+}
+
+export interface HealthCheck {
+  name: string;
+  status: "pass" | "warn" | "fail" | "skip";
+  message: string;
+  value?: string | number;
+}
+
+export interface HealthCheckResult {
+  status: "healthy" | "warning" | "critical";
+  engineId: string;
+  engineType: string;
+  checks: HealthCheck[];
+  timestamp: string;
+}
+
 export interface BlockingChain {
   engine_id: string;
   blocking_pid: number;
@@ -88,6 +145,15 @@ export interface DatabaseConnector {
 
   /** List indexes on a table */
   listIndexes(engineId: string, config: import("./config.js").EngineConfig, table: string, database?: string): Promise<IndexInfo[]>;
+
+  /** List table sizes (data, index, total) for a database/schema */
+  listTableSizes(engineId: string, config: import("./config.js").EngineConfig, database?: string): Promise<TableSizeInfo[]>;
+
+  /** Explain a query's execution plan (EXPLAIN). For MongoDB, `query` is a JSON command document. */
+  explainQuery(engineId: string, config: import("./config.js").EngineConfig, query: string, options?: ExplainOptions): Promise<ExplainResult>;
+
+  /** List slow queries from engine internals (performance_schema, pg_stat_statements, etc.) */
+  listSlowQueries(engineId: string, config: import("./config.js").EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]>;
 
   /** Show active processes/connections */
   listProcesses(engineId: string, config: import("./config.js").EngineConfig): Promise<ProcessInfo[]>;

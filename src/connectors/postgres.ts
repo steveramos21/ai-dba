@@ -4,11 +4,16 @@ import type {
   DatabaseConnector,
   DatabaseInfo,
   TableInfo,
+  TableSizeInfo,
   ColumnInfo,
   IndexInfo,
   ProcessInfo,
   QueryResult,
   BlockingChain,
+  ExplainResult,
+  ExplainOptions,
+  SlowQueryInfo,
+  SlowQueryOptions,
 } from "../connector.js";
 
 export class PostgreSQLConnector implements DatabaseConnector {
@@ -149,6 +154,135 @@ export class PostgreSQLConnector implements DatabaseConnector {
           type: isUnique ? "UNIQUE" : "BTREE",
         };
       });
+    } finally {
+      client.release();
+    }
+  }
+
+  async listTableSizes(engineId: string, config: EngineConfig, database?: string): Promise<TableSizeInfo[]> {
+    const pool = this.getPool(engineId, config);
+    const client = await pool.connect();
+    try {
+      if (database) {
+        // Filter by specific schema
+        const res = await client.query(
+          `SELECT
+            c.relname       as name,
+            n.nspname       as schema,
+            c.reltuples::bigint as rows,
+            pg_relation_size(c.oid)      as data_size,
+            pg_indexes_size(c.oid)        as index_size,
+            pg_total_relation_size(c.oid) as total_size
+          FROM pg_class c
+          JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE c.relkind = 'r' AND n.nspname = $1
+          ORDER BY pg_total_relation_size(c.oid) DESC`,
+          [database]
+        );
+        return res.rows.map((row: any) => ({
+          name: row.name,
+          schema: row.schema,
+          rows: Number(row.rows),
+          dataSizeBytes: Number(row.data_size),
+          indexSizeBytes: Number(row.index_size),
+          totalSizeBytes: Number(row.total_size),
+        }));
+      }
+      // All user schemas (exclude system)
+      const res = await client.query(
+        `SELECT
+          c.relname       as name,
+          n.nspname       as schema,
+          c.reltuples::bigint as rows,
+          pg_relation_size(c.oid)      as data_size,
+          pg_indexes_size(c.oid)        as index_size,
+          pg_total_relation_size(c.oid) as total_size
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relkind = 'r' AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+        ORDER BY pg_total_relation_size(c.oid) DESC`
+      );
+      return res.rows.map((row: any) => ({
+        name: row.name,
+        schema: row.schema,
+        rows: Number(row.rows),
+        dataSizeBytes: Number(row.data_size),
+        indexSizeBytes: Number(row.index_size),
+        totalSizeBytes: Number(row.total_size),
+      }));
+    } finally {
+      client.release();
+    }
+  }
+
+  async explainQuery(engineId: string, config: EngineConfig, query: string, options?: ExplainOptions): Promise<ExplainResult> {
+    const analyze = options?.analyze ?? false;
+    const pool = this.getPool(engineId, config);
+    const client = await pool.connect();
+    try {
+      const options_ = analyze ? "FORMAT JSON, ANALYZE, BUFFERS" : "FORMAT JSON";
+      const res = await client.query(`EXPLAIN (${options_}) ${query}`);
+      // PostgreSQL returns one row with a JSON array column named "QUERY PLAN"
+      const raw = res.rows[0]?.["QUERY PLAN"] ?? res.rows;
+      let plan = typeof raw === "string" ? raw : JSON.stringify(raw, null, 2);
+      let estimatedCost: number | undefined;
+      let estimatedRows: number | undefined;
+      try {
+        const parsed = Array.isArray(raw) ? raw[0] : (typeof raw === "string" ? JSON.parse(raw)[0] : raw);
+        if (parsed?.Plan) {
+          estimatedCost = parsed.Plan?.["Total Cost"];
+          estimatedRows = parsed.Plan?.["Plan Rows"];
+        }
+        plan = JSON.stringify(Array.isArray(raw) ? raw : [parsed], null, 2);
+      } catch {
+        // Not JSON-parseable — return raw
+      }
+      return { plan, format: "json", estimatedCost, estimatedRows, analyzed: analyze };
+    } finally {
+      client.release();
+    }
+  }
+
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+    const limit = options?.limit ?? 10;
+    const minDurationMs = options?.minDurationMs ?? 1000;
+    const pool = this.getPool(engineId, config);
+    const client = await pool.connect();
+    try {
+      // pg_stat_statements — requires the extension to be installed
+      const res = await client.query(
+        `SELECT
+          queryid::text       AS query_id,
+          query               AS query_text,
+          calls               AS exec_count,
+          total_exec_time     AS total_time_ms,
+          mean_exec_time      AS avg_time_ms,
+          max_exec_time       AS max_time_ms,
+          rows               AS rows_returned,
+          min_exec_time       AS min_time_ms
+        FROM pg_stat_statements
+        WHERE total_exec_time >= $1
+        ORDER BY total_exec_time DESC
+        LIMIT $2`,
+        [minDurationMs, limit]
+      );
+      return res.rows.map((row: any) => ({
+        id: `pg-${row.query_id}`,
+        query: row.query_text ?? "",
+        executionCount: Number(row.exec_count),
+        totalExecutionTimeMs: Math.round(Number(row.total_time_ms)),
+        avgExecutionTimeMs: Math.round(Number(row.avg_time_ms)),
+        maxExecutionTimeMs: Math.round(Number(row.max_time_ms)),
+        rowsReturned: Number(row.rows_returned) || undefined,
+      }));
+    } catch (e: any) {
+      // Extension not installed or permission denied — return empty
+      if (e.message?.includes("pg_stat_statements") ||
+          e.message?.includes("does not exist") ||
+          e.code === "42501" || e.code === "42P01") {
+        return [];
+      }
+      throw e;
     } finally {
       client.release();
     }

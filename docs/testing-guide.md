@@ -12,8 +12,9 @@ This guide covers manual testing procedures for all sprints. Each section reflec
 | 4 | SQL Server connector | MERGED | [Sprint 4 - SQL Server](#sprint-4-sql-server) |
 | 5 | Oracle connector | MERGED | [Sprint 5 - Oracle](#sprint-5-oracle) |
 | 6 | MongoDB connector | MERGED | [Sprint 6 - MongoDB](#sprint-6-mongodb) |
+| 8 | Query performance & health | COMPLETE | [Sprint 8 - Performance](#sprint-8-query-performance-health) |
 
-**Test totals:** 39 unit tests + 121 integration tests = 160 tests, all passing.
+**Test totals:** 75 unit tests + 121 integration tests + 84 Sprint 8 integration tests = 280 tests, all passing.
 
 ## Prerequisites (all sprints)
 
@@ -38,7 +39,7 @@ docker info | head -3
 npm test
 ```
 
-**Expected:** 10 test files, 39 tests, all passing. Duration ~20s.
+**Expected:** 15 test files, 75 tests, all passing. Duration ~20s.
 
 ### 2. Integration Tests (Docker required)
 
@@ -109,7 +110,7 @@ quit              — "Bye."
 ```bash
 echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | timeout 5 node dist/index.js --config config.yaml serve 2>/dev/null
 ```
-**Expected:** JSON response listing 6 tools: blocking-chains, databases, tables, describe-table, indexes, processes.
+**Expected:** JSON response listing 10 tools: blocking-chains, databases, tables, describe-table, indexes, processes, table-sizes, explain, slow-queries, health-check.
 
 ---
 
@@ -174,13 +175,13 @@ docker exec ai-dba-sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U 
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 10 test files, 39 tests (includes 4 SQL Server URL parser tests)
+# Expected: 15 test files, 75 tests (includes 4 SQL Server URL parser tests)
 ```
 
 **Step 4: Run integration tests**
 ```bash
 node test/integration-all.mjs
-# Expected: 121 tests total, 0 failures (includes 24 SQL Server tests)
+# Expected: 121 tests total, 0 failures (includes 24 SQL Server tests). Sprint 8 adds 84 more via `npm run test:integration:sprint8`.
 ```
 
 **Step 5: CLI tests**
@@ -326,13 +327,13 @@ docker exec ai-dba-oracle-test bash -c "echo 'CREATE TABLE blocking_test (id NUM
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 10 test files, 39 tests (includes 4 Oracle URL parser tests)
+# Expected: 15 test files, 75 tests (includes 4 Oracle URL parser tests)
 ```
 
 **Step 4: Run integration tests**
 ```bash
 node test/integration-all.mjs
-# Expected: 121 tests total, 0 failures (includes 24 Oracle tests)
+# Expected: 121 tests total, 0 failures (includes 24 Oracle tests). Sprint 8 adds 84 more via `npm run test:integration:sprint8`.
 ```
 
 **Step 5: CLI tests**
@@ -479,13 +480,13 @@ docker exec ai-dba-mongodb-test mongosh "mongodb://testuser:testpassword@127.0.0
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 10 test files, 39 tests (includes 4 MongoDB URL parser tests)
+# Expected: 15 test files, 75 tests (includes 4 MongoDB URL parser tests)
 ```
 
 **Step 4: Run integration tests**
 ```bash
 node test/integration-all.mjs
-# Expected: 121 tests total, 0 failures (includes 24 MongoDB tests)
+# Expected: 121 tests total, 0 failures (includes 24 MongoDB tests). Sprint 8 adds 84 more via `npm run test:integration:sprint8`.
 ```
 
 **Step 5: CLI tests**
@@ -568,7 +569,7 @@ Run this checklist after all sprints are merged:
 ### Pre-flight
 - [ ] `npm install` — no errors
 - [ ] `npm run build` — TypeScript compiles, 0 errors
-- [ ] `npm test` — 39 unit tests pass
+- [ ] `npm test` — 75 unit tests pass
 - [ ] `docker compose up -d` — all 5 containers healthy (MySQL 13306, PostgreSQL 15432, SQL Server 11433, Oracle 11521, MongoDB 12017)
 
 ### Per-engine verification
@@ -588,6 +589,22 @@ For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb
 - [ ] MCP `processes` tool returns JSON
 - [ ] MCP `blocking-chains` tool returns JSON
 
+### Sprint 8 features
+For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb-test):
+
+- [ ] CLI `table-sizes <engineId>` returns table sizes with human-readable formatting
+- [ ] CLI `explain <engineId> "SELECT 1"` returns execution plan
+- [ ] CLI `slow-queries <engineId>` returns array (may be empty for engines without features)
+- [ ] CLI `health-check <engineId>` returns status (healthy/warning/critical)
+- [ ] REPL `table-sizes` (alias `ts`) works
+- [ ] REPL `explain "SELECT 1"` (alias `exp`) works
+- [ ] REPL `slow-queries` (alias `sq`) works
+- [ ] REPL `health-check` (alias `hc`) works
+- [ ] MCP `table-sizes` tool returns JSON
+- [ ] MCP `explain` tool returns JSON
+- [ ] MCP `slow-queries` tool returns JSON
+- [ ] MCP `health-check` tool returns JSON
+
 ### Blocking scenario per engine
 - [ ] MySQL — row lock detected, correct PIDs, queries, wait time
 - [ ] PostgreSQL — table lock detected, correct PIDs, queries, wait event
@@ -596,11 +613,112 @@ For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb
 - [ ] MongoDB — long-running op detected (if applicable)
 
 ### Integration tests
-- [ ] `node test/integration-all.mjs` — 121 tests pass
+- [ ] `npm run test:integration` — 121 tests pass (Sprints 1-7)
+- [ ] `npm run test:integration:sprint8` — 84 tests pass (Sprint 8)
 
 ### MCP server
-- [ ] `tools/list` returns 6 tools
+- [ ] `tools/list` returns 10 tools
 - [ ] Each tool accepts engineId and returns valid JSON
 - [ ] Unknown engineId returns error
 - [ ] Unsupported engine type returns error
 - [ ] Connector errors are propagated as error responses
+
+---
+
+## Sprint 8 - Query Performance & Health
+
+**Status:** COMPLETE
+**Features:** `table-sizes`, `explain`, `slow-queries`, `health-check`
+
+### Prerequisites
+
+- All 5 Docker containers running and healthy
+- `npm run build` succeeds with 0 errors
+- `npm test` passes (75 unit tests)
+
+### Step 1: Run unit tests
+
+```bash
+npm test
+# Expected: 15 test files, 75 tests, all passing
+```
+
+### Step 2: Run Sprint 8 integration tests
+
+```bash
+npm run test:integration:sprint8
+# Expected: 84 tests, 0 failures
+```
+
+Tests `table-sizes`, `explain`, `slow-queries`, and `health-check` against all 5 live databases. Graceful degradation verified: PostgreSQL returns empty slow queries (no `pg_stat_statements`), Oracle returns empty (no `V$SQLAREA` access), SQL Server returns empty slow queries (no query history yet).
+
+### Step 3: CLI smoke tests
+
+```bash
+# Table sizes — human-readable output
+node dist/index.js --config config.yaml table-sizes mysql-test
+# Expected: Table with columns Table, Rows, Data, Index, Total, Free
+
+# Explain — execution plan
+node dist/index.js --config config.yaml explain mysql-test "SELECT * FROM blocking_test WHERE id = 1"
+# Expected: JSON or text execution plan
+
+# Explain with analyze (PostgreSQL only — actually executes the query)
+node dist/index.js --config config.yaml explain postgres-test "SELECT * FROM blocking_test WHERE id = 1" -a
+# Expected: JSON plan with execution stats
+
+# Explain MongoDB (JSON command document)
+node dist/index.js --config config.yaml explain mongodb-test '{"find":"blocking_test","filter":{}}'
+# Expected: JSON explain output
+
+# Slow queries
+node dist/index.js --config config.yaml slow-queries mysql-test
+# Expected: Table with Query, Execs, Total, Avg, Max, Rows columns
+
+# Health check
+node dist/index.js --config config.yaml health-check mysql-test
+# Expected: Status table with 4 checks (connectivity, blocking, processes, slow-queries)
+```
+
+### Step 4: REPL tests
+
+```bash
+node dist/index.js --config config.yaml repl
+use mysql-test
+
+table-sizes         — table sizes with human-readable formatting
+ts                  — alias works
+explain SELECT 1    — execution plan
+exp SELECT 1        — alias works
+slow-queries        — slow query list
+sq                  — alias works
+health-check        — health status (4 checks)
+hc                  — alias works
+
+use postgres-test
+explain SELECT * FROM blocking_test -a  — EXPLAIN ANALYZE (executes query)
+
+use mongodb-test
+explain {"find":"blocking_test","filter":{}}  — MongoDB explain
+```
+
+### Step 5: MCP tool verification
+
+```bash
+echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | timeout 5 node dist/index.js --config config.yaml serve 2>/dev/null
+# Expected: 10 tools listed including table-sizes, explain, slow-queries, health-check
+
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"table-sizes","arguments":{"engineId":"mysql-test"}},"id":2}' | timeout 5 node dist/index.js --config config.yaml serve 2>/dev/null
+# Expected: JSON with table sizes
+
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"health-check","arguments":{"engineId":"mysql-test"}},"id":3}' | timeout 5 node dist/index.js --config config.yaml serve 2>/dev/null
+# Expected: JSON with status: "healthy" or "warning" and 4 checks
+```
+
+### Known Issues
+
+- **PostgreSQL `pg_stat_statements`:** Not installed in the Docker test container by default. `slow-queries` returns empty array (graceful degradation). Install with: `CREATE EXTENSION pg_stat_statements;` (requires `shared_preload_libraries`).
+- **Oracle `V$SQLAREA`:** Requires SELECT ANY DICTIONARY. `slow-queries` returns empty if denied.
+- **SQL Server `LIMIT`:** SQL Server uses `TOP N`, not `LIMIT N`. The explain integration test uses `SELECT TOP 1` for SQL Server.
+- **MySQL `EXPLAIN ANALYZE`:** MySQL doesn't support `EXPLAIN ANALYZE`. The `-a` flag is silently ignored.
+- **MongoDB `currentOp`:** Shows currently running ops only (no historical slow query log). `slow-queries` returns ops with `secs_running >= minDurationMs`.

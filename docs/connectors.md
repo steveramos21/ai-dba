@@ -1,6 +1,6 @@
 # Connectors
 
-AI-DBA supports five database engines, each implementing the `DatabaseConnector` interface with seven methods.
+AI-DBA supports five database engines, each implementing the `DatabaseConnector` interface with ten methods.
 
 ## Interface
 
@@ -15,6 +15,9 @@ All connectors implement:
 | `listProcesses` | Active connections/sessions |
 | `query` | Read-only SQL/JSON query (rejects writes) |
 | `getBlockingChains` | Blocking/lock detection |
+| `listTableSizes` | Table size breakdown (rows, data bytes, index bytes, total bytes) |
+| `explainQuery` | Execution plan analysis (EXPLAIN, optional ANALYZE) |
+| `listSlowQueries` | Slow query data from engine internals |
 
 ## MySQL
 
@@ -120,6 +123,11 @@ my-mongo:
 | listProcesses | processlist | pg_stat_activity | dm_exec_sessions | v$session* | currentOp |
 | query | SQL | SQL | SQL | SQL | JSON commands |
 | getBlockingChains | Lock waits | pg_blocking_pids | dm_os_waiting_tasks | v$session* | Long ops |
+| listTableSizes | info_schema | pg_relation_size | sp_spaceused | all_segments | collStats |
+| explainQuery | FORMAT=JSON | FORMAT JSON | SHOWPLAN_XML | EXPLAIN PLAN | explain cmd |
+| listSlowQueries | perf_schema | pg_stat_statements† | dm_exec_query_stats‡ | v$sqlarea* | currentOp |
 | Connection pooling | Yes (mysql2) | Yes (pg.Pool) | No (per-call) | Yes (oracledb pool) | Yes (MongoClient) |
 
 *Requires SELECT ANY DICTIONARY privilege.
+†Requires `pg_stat_statements` extension. Returns empty if not installed.
+‡Requires `VIEW SERVER STATE` permission. Returns empty if denied.
