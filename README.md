@@ -11,6 +11,11 @@ Universal database copilot — diagnostics, operations, and performance analysis
 - **Database-agnostic commands** — `databases`, `tables`, `describe`, `indexes`, `processes` work across engines
 - **Multi-engine support** — MySQL, PostgreSQL, SQL Server, Oracle, and MongoDB connectors
 - **MySQL blocking chains** — detect and report row-level blocking with full query details
+- **Table sizes** — list table/collection sizes with human-readable formatting (`table-sizes`)
+- **Explain plans** — execution plan analysis with optional `--analyze` flag (PostgreSQL executes the query)
+- **Slow queries** — surface slow query data from engine internals (performance_schema, pg_stat_statements, sys.dm_exec_query_stats, V$SQLAREA, currentOp)
+- **Health checks** — orchestrate connectivity, blocking, processes, and slow queries into one status call
+- **SQL guard** — shared validation module rejects destructive SQL before it reaches connectors
 - **GitHub Actions CI** — build + test on Node 20/22, runs on every push/PR to main
 - **Documentation site** — MkDocs Material with 8 pages, light/dark mode, search
 
@@ -75,6 +80,10 @@ npm run connect -- 'postgresql://postgres:***@127.0.0.1:5432/mydb'
 | `serve` | Start MCP server over stdio (for AI agents) |
 | `list-engines` | List configured database engines |
 | `blocking-chains <engineId>` | Show current blocking chains |
+| `table-sizes <engineId> [database]` | List table sizes with human-readable formatting |
+| `explain <engineId> <query> [-a]` | Show execution plan (add `-a` for ANALYZE) |
+| `slow-queries <engineId> [--limit N] [--min-duration-ms N]` | List slow queries from engine internals |
+| `health-check <engineId>` | Run health check (connectivity, blocking, processes, slow queries) |
 | `connect <url>` | Connect to a database via URL |
 | `repl` | Interactive REPL for database diagnostics |
 
@@ -236,6 +245,10 @@ The server exposes six tools:
 | `describe-table` | `engineId` (string, required), `table` (string, required), `database` (string, optional) | Show column metadata for a table |
 | `indexes` | `engineId` (string, required), `table` (string, required), `database` (string, optional) | List indexes on a table |
 | `processes` | `engineId` (string, required) | List active database connections/processes |
+| `table-sizes` | `engineId` (string, required), `database` (string, optional) | List table sizes with data/index/total breakdown |
+| `explain` | `engineId` (string, required), `query` (string, required), `analyze` (boolean, optional) | Show execution plan for a query |
+| `slow-queries` | `engineId` (string, required), `limit` (int, optional), `minDurationMs` (int, optional) | List slow queries from engine internals |
+| `health-check` | `engineId` (string, required) | Run health check (connectivity, blocking, processes, slow queries) |
 
 All tools return JSON. The `database` parameter overrides the engine's configured database (MySQL) or schema (PostgreSQL).
 
@@ -378,10 +391,14 @@ src/
   index.ts              CLI entry point (commander, REPL)
   server.ts             MCP server setup + connector map
   config.ts             YAML config loader with URL parsing
-  connector.ts          DatabaseConnector interface + BlockingChain type (engine-agnostic)
+  connector.ts          DatabaseConnector interface + shared types (BlockingChain, TableSizeInfo, ExplainResult, SlowQueryInfo, HealthCheckResult)
+  sql-guard.ts          Shared SQL validation (validateReadOnlySql, validateExplainQuery, isJsonCommand)
   connectors/
     mysql.ts            MySQLConnector (implements DatabaseConnector)
     postgres.ts         PostgreSQLConnector (implements DatabaseConnector)
+    sqlserver.ts        SqlServerConnector (implements DatabaseConnector)
+    oracle.ts           OracleConnector (implements DatabaseConnector)
+    mongodb.ts          MongoDbConnector (implements DatabaseConnector)
   tools/
     blocking-chains.ts  MCP tool — blocking chain diagnostics
     databases.ts        MCP tool — list databases/schemas
@@ -389,12 +406,18 @@ src/
     describe-table.ts   MCP tool — column metadata
     indexes.ts          MCP tool — list indexes
     processes.ts        MCP tool — active processes/connections
+    table-sizes.ts      MCP tool — table size breakdown
+    explain.ts          MCP tool — execution plans
+    slow-queries.ts     MCP tool — slow query analysis
+    health-check.ts     MCP tool — orchestrated health check
 ```
 
-- **DatabaseConnector interface** — standard commands (`databases`, `tables`, `describe`, `indexes`, `processes`, `query`) that work across engines. MySQL and PostgreSQL are implemented; SQL Server, Oracle, and MongoDB are planned.
+- **DatabaseConnector interface** — 10 methods: `listDatabases`, `listTables`, `describeTable`, `listIndexes`, `listProcesses`, `query`, `getBlockingChains`, `listTableSizes`, `explainQuery`, `listSlowQueries`. All 5 engines implement the interface.
+- **sql-guard.ts** — shared validation module used by CLI, REPL, and MCP tool paths. Rejects destructive SQL (INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, MERGE, GRANT, REVOKE) using `\b` word-boundary regex.
 - **Lazy imports** — MCP SDK, mysql2, and pg are loaded dynamically only when needed. CLI commands like `list-engines` start instantly without loading database drivers.
 - **Lazy connection pools** — Database connections are created on first use, not at startup.
 - **One tool per file** — each `src/tools/*.ts` file is self-contained (schema + handler). Adding a new tool means adding a new file and registering it in `server.ts`.
+- **Graceful degradation** — `slow-queries` and `explain` return empty results when engine features are unavailable (extension not installed, permission denied) rather than throwing errors.
 - **GitHub Actions CI** — `.github/workflows/ci.yml` runs build + unit tests on Node 20/22 for every push/PR to main.
 
 ## Requirements

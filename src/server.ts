@@ -12,6 +12,10 @@ import { registerTablesTool } from "./tools/tables.js";
 import { registerDescribeTableTool } from "./tools/describe-table.js";
 import { registerIndexesTool } from "./tools/indexes.js";
 import { registerProcessesTool } from "./tools/processes.js";
+import { registerTableSizesTool } from "./tools/table-sizes.js";
+import { registerExplainTool } from "./tools/explain.js";
+import { registerSlowQueriesTool } from "./tools/slow-queries.js";
+import { registerHealthCheckTool } from "./tools/health-check.js";
 
 /**
  * Build the connector map for all supported engine types.
@@ -44,6 +48,10 @@ export function createServer(config: AiDbaConfig): McpServer {
   registerDescribeTableTool(server, config, connectors);
   registerIndexesTool(server, config, connectors);
   registerProcessesTool(server, config, connectors);
+  registerTableSizesTool(server, config, connectors);
+  registerExplainTool(server, config, connectors);
+  registerSlowQueriesTool(server, config, connectors);
+  registerHealthCheckTool(server, config, connectors);
 
   return server;
 }

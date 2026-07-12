@@ -16,6 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "node test/integration-all.mjs",
+    "test:integration:sprint8": "node test/integration-sprint8.mjs",
     "test:blocking": "node test/integration-blocking.mjs"
   },
   "dependencies": {

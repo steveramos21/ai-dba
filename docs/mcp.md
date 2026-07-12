@@ -12,7 +12,7 @@ The server communicates over stdio (JSON-RPC).
 
 ## MCP Tools
 
-Six tools are registered:
+Ten tools are registered:
 
 ### `databases`
 List databases/schemas on an engine.
@@ -49,6 +49,32 @@ Detect blocking chains.
 ```json
 {"name": "blocking-chains", "arguments": {"engineId": "my-mysql"}}
 ```
+
+### `table-sizes`
+List table sizes with data/index/total breakdown.
+```json
+{"name": "table-sizes", "arguments": {"engineId": "my-mysql", "database": "information_schema"}}
+```
+
+### `explain`
+Show execution plan for a query. For MongoDB, `query` is a JSON command document.
+```json
+{"name": "explain", "arguments": {"engineId": "my-mysql", "query": "SELECT * FROM users WHERE id = 1", "analyze": false}}
+```
+Set `analyze: true` for `EXPLAIN ANALYZE` (PostgreSQL executes the query; MySQL ignores the flag).
+
+### `slow-queries`
+List slow queries from engine internals. Returns empty array if the feature is unavailable.
+```json
+{"name": "slow-queries", "arguments": {"engineId": "my-mysql", "limit": 10, "minDurationMs": 1000}}
+```
+
+### `health-check`
+Run a health check — orchestrates connectivity, blocking chains, processes, and slow queries.
+```json
+{"name": "health-check", "arguments": {"engineId": "my-mysql"}}
+```
+Returns `status: "healthy" | "warning" | "critical"` with per-check breakdown.
 
 ## Integration with AI Agents
 

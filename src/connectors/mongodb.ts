@@ -4,11 +4,16 @@ import type {
   DatabaseConnector,
   DatabaseInfo,
   TableInfo,
+  TableSizeInfo,
   ColumnInfo,
   IndexInfo,
   ProcessInfo,
   QueryResult,
   BlockingChain,
+  ExplainResult,
+  ExplainOptions,
+  SlowQueryInfo,
+  SlowQueryOptions,
 } from "../connector.js";
 
 /**
@@ -125,6 +130,87 @@ export class MongoDbConnector implements DatabaseConnector {
       isPrimary: idx.name === "_id_",
       type: (idx.unique === true || idx.name === "_id_") ? "UNIQUE" : "BTREE",
     }));
+  }
+
+  async listTableSizes(engineId: string, config: EngineConfig, database?: string): Promise<TableSizeInfo[]> {
+    const { client, db: defaultDb } = await this.getClient(engineId, config);
+    const targetDb = database ? client.db(database) : defaultDb;
+    const collections = await targetDb.listCollections().toArray();
+    const sizes: TableSizeInfo[] = [];
+    for (const col of collections) {
+      try {
+        const stats = await targetDb.command({ collStats: col.name }) as any;
+        sizes.push({
+          name: col.name,
+          rows: stats.count ?? undefined,
+          dataSizeBytes: stats.size ?? 0,
+          indexSizeBytes: stats.totalIndexSize ?? 0,
+          totalSizeBytes: (stats.size ?? 0) + (stats.totalIndexSize ?? 0),
+        });
+      } catch {
+        // Skip collections we can't stat (e.g., views)
+      }
+    }
+    sizes.sort((a, b) => (b.totalSizeBytes ?? 0) - (a.totalSizeBytes ?? 0));
+    return sizes;
+  }
+
+  async explainQuery(engineId: string, config: EngineConfig, query: string, options?: ExplainOptions): Promise<ExplainResult> {
+    const analyze = options?.analyze ?? false;
+    const { client, db } = await this.getClient(engineId, config);
+
+    // MongoDB: `query` is a JSON command document like {"find": "users", "filter": {}}
+    let cmd: Record<string, unknown>;
+    try {
+      cmd = JSON.parse(query);
+    } catch {
+      throw new Error("MongoDB explain requires a JSON command document, e.g. {\"find\": \"collection\", \"filter\": {}}");
+    }
+
+    if (!cmd.find && !cmd.aggregate && !cmd.count && !cmd.distinct) {
+      throw new Error("MongoDB explain JSON must contain a 'find', 'aggregate', 'count', or 'distinct' key");
+    }
+
+    const verbosity = analyze ? "executionStats" : "queryPlanner";
+
+    let explainCmd: Record<string, unknown>;
+    if (cmd.find) {
+      explainCmd = { explain: { find: cmd.find, filter: cmd.filter || {} }, verbosity };
+    } else if (cmd.aggregate) {
+      explainCmd = { explain: { aggregate: cmd.aggregate, pipeline: cmd.pipeline || [], cursor: {} }, verbosity };
+    } else if (cmd.count) {
+      explainCmd = { explain: { count: cmd.count, query: cmd.filter || {} }, verbosity };
+    } else if (cmd.distinct) {
+      explainCmd = { explain: { distinct: cmd.distinct, key: cmd.field, query: cmd.filter || {} }, verbosity };
+    } else {
+      throw new Error("Unsupported command for explain");
+    }
+
+    const result = await db.command(explainCmd as any);
+    return { plan: JSON.stringify(result, null, 2), format: "json", analyzed: analyze };
+  }
+
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+    const limit = options?.limit ?? 10;
+    const minDurationMs = options?.minDurationMs ?? 1000;
+    const minDurationSec = minDurationMs / 1000;
+    const { client } = await this.getClient(engineId, config);
+    const admin = client.db().admin();
+    try {
+      const result = await admin.command({ currentOp: 1, $ownOps: false, secs_running: { $gte: minDurationSec } });
+      const ops = (result.inprog || []).slice(0, limit);
+      return ops.map((op: any, i: number) => ({
+        id: `mongo-${op.opid ?? i}`,
+        query: op.command ? JSON.stringify(op.command).substring(0, 2000) : "",
+        database: op.ns ?? undefined,
+        totalExecutionTimeMs: Math.round((op.secs_running || 0) * 1000),
+        executionCount: undefined,
+        maxExecutionTimeMs: undefined,
+      }));
+    } catch {
+      // currentOp may require privileges — return empty
+      return [];
+    }
   }
 
   async listProcesses(engineId: string, config: EngineConfig): Promise<ProcessInfo[]> {

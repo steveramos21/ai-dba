@@ -5,11 +5,16 @@ import type {
   DatabaseConnector,
   DatabaseInfo,
   TableInfo,
+  TableSizeInfo,
   ColumnInfo,
   IndexInfo,
   ProcessInfo,
   QueryResult,
   BlockingChain,
+  ExplainResult,
+  ExplainOptions,
+  SlowQueryInfo,
+  SlowQueryOptions,
 } from "../connector.js";
 
 export class MySQLConnector implements DatabaseConnector {
@@ -137,6 +142,121 @@ export class MySQLConnector implements DatabaseConnector {
         isPrimary: row.name === "PRIMARY",
         type: row.index_type,
       }));
+    } finally {
+      connection.release();
+    }
+  }
+
+  async listTableSizes(engineId: string, config: EngineConfig, database?: string): Promise<TableSizeInfo[]> {
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
+    try {
+      const resolved = config.url ? resolveMysqlConfig(engineId, config) : undefined;
+      const dbName = database || config.database || resolved?.database;
+      if (!dbName) throw new Error(`No database specified for engine "${engineId}". Pass a database parameter or configure one in config.yaml.`);
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT
+          TABLE_NAME    as name,
+          TABLE_ROWS    as \`rows\`,
+          DATA_LENGTH   as data_length,
+          INDEX_LENGTH  as index_length,
+          DATA_FREE     as data_free,
+          TABLE_COMMENT as comment
+        FROM INFORMATION_SCHEMA.TABLES
+        WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'
+        ORDER BY (DATA_LENGTH + INDEX_LENGTH) DESC`,
+        [dbName]
+      );
+      return rows.map((row: any) => ({
+        name: row.name,
+        rows: row.rows,
+        dataSizeBytes: row.data_length ?? 0,
+        indexSizeBytes: row.index_length ?? 0,
+        totalSizeBytes: (row.data_length ?? 0) + (row.index_length ?? 0),
+        dataFreeBytes: row.data_free ?? 0,
+        comment: row.comment || undefined,
+      }));
+    } finally {
+      connection.release();
+    }
+  }
+
+  async explainQuery(engineId: string, config: EngineConfig, query: string, _options?: ExplainOptions): Promise<ExplainResult> {
+    // MySQL does not support EXPLAIN ANALYZE — the analyze flag is silently ignored.
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `EXPLAIN FORMAT=JSON ${query}`
+      );
+      // MySQL returns a single row with a JSON column named "EXPLAIN"
+      const raw = rows[0]?.EXPLAIN ?? JSON.stringify(rows);
+      let plan = raw;
+      let estimatedCost: number | undefined;
+      let estimatedRows: number | undefined;
+      try {
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (parsed?.query_block) {
+          const qb = parsed.query_block;
+          estimatedCost = qb.cost_info?.query_cost ?? undefined;
+          estimatedRows = qb.table?.[0]?.rows_examined_per_scan ?? undefined;
+        }
+        plan = JSON.stringify(parsed, null, 2);
+      } catch {
+        // Not JSON-parseable — return raw text
+      }
+      return { plan, format: "json", estimatedCost, estimatedRows, analyzed: false };
+    } finally {
+      connection.release();
+    }
+  }
+
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+    const limit = options?.limit ?? 10;
+    const minDurationMs = options?.minDurationMs ?? 1000;
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
+    try {
+      // MySQL: performance_schema.events_statements_summary_by_digest
+      // Timer values are in picoseconds — divide by 1,000,000,000 to get milliseconds
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT
+          DIGEST_TEXT                  AS digest_text,
+          SCHEMA_NAME                  AS schema_name,
+          COUNT_STAR                   AS exec_count,
+          SUM_TIMER_WAIT / 1000000000 AS total_time_ms,
+          AVG_TIMER_WAIT / 1000000000 AS avg_time_ms,
+          MAX_TIMER_WAIT / 1000000000 AS max_time_ms,
+          SUM_ROWS_EXAMINED            AS rows_examined,
+          SUM_ROWS_SENT                AS rows_returned,
+          FIRST_SEEN                   AS first_seen,
+          LAST_SEEN                    AS last_seen
+        FROM performance_schema.events_statements_summary_by_digest
+        WHERE DIGEST_TEXT IS NOT NULL
+          AND SUM_TIMER_WAIT / 1000000000 >= ?
+        ORDER BY SUM_TIMER_WAIT DESC
+        LIMIT ?`,
+        [minDurationMs, limit]
+      );
+      return rows.map((row: any, i: number) => ({
+        id: `mysql-${i}`,
+        query: row.digest_text ?? "",
+        database: row.schema_name ?? undefined,
+        executionCount: Number(row.exec_count),
+        totalExecutionTimeMs: Math.round(Number(row.total_time_ms)),
+        avgExecutionTimeMs: Math.round(Number(row.avg_time_ms)),
+        maxExecutionTimeMs: Math.round(Number(row.max_time_ms)),
+        rowsExamined: Number(row.rows_examined) || undefined,
+        rowsReturned: Number(row.rows_returned) || undefined,
+        firstSeen: row.first_seen ? String(row.first_seen) : undefined,
+        lastSeen: row.last_seen ? String(row.last_seen) : undefined,
+      }));
+    } catch (e: any) {
+      // performance_schema may be disabled or not accessible
+      if (e.message?.includes("performance_schema") || e.code === "ER_ACCESS_DENIED") {
+        return [];
+      }
+      throw e;
     } finally {
       connection.release();
     }

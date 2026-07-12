@@ -6,6 +6,7 @@ import Table from "cli-table3";
 import { loadConfig, parseMysqlUrl, resolveMysqlConfig } from "./config.js";
 import type { EngineConfig } from "./config.js";
 import type { DatabaseConnector } from "./connector.js";
+import { validateExplainQuery, isJsonCommand, validateReadOnlySql } from "./sql-guard.js";
 
 const program = new Command();
 
@@ -72,6 +73,23 @@ function parseUrlToEngine(url: string): { id: string; config: EngineConfig; mask
     return { id, config, maskedUrl: masked };
   }
   return null;
+}
+
+// ─── Helper: format bytes human-readable ─────────────────────
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// ─── Helper: format duration human-readable ─────────────────
+function formatDuration(ms: number): string {
+  if (!ms || ms === 0) return "0ms";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 3600000) return `${(ms / 60000).toFixed(1)}m`;
+  return `${(ms / 3600000).toFixed(1)}h`;
 }
 
 // ─── Helper: render query results ──────────────────────────────
@@ -442,6 +460,195 @@ program
     }
   });
 
+// ─── table-sizes ─────────────────────────────────────────────
+program
+  .command("table-sizes <engineId> [database]")
+  .description("List table sizes (data, index, total) for a database/schema")
+  .action(async (engineId: string, database?: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const sizes = await connector.listTableSizes(engineId, engine, database);
+      const table = new Table({
+        head: [chalk.white("Table"), chalk.white("Rows"), chalk.white("Data"), chalk.white("Index"), chalk.white("Total"), chalk.white("Free")],
+      });
+      for (const s of sizes) {
+        table.push([
+          s.name,
+          s.rows?.toLocaleString() ?? "-",
+          formatBytes(s.dataSizeBytes ?? 0),
+          formatBytes(s.indexSizeBytes ?? 0),
+          formatBytes(s.totalSizeBytes),
+          s.dataFreeBytes ? formatBytes(s.dataFreeBytes) : "-",
+        ]);
+      }
+      console.log(table.toString());
+      console.log(chalk.dim(`${sizes.length} table(s)`));
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+// ─── explain ─────────────────────────────────────────────────
+program
+  .command("explain <engineId> <query>")
+  .description("Show execution plan for a query (EXPLAIN)")
+  .option("-a, --analyze", "Execute query to collect runtime stats (PostgreSQL only — actually runs the query)")
+  .action(async (engineId: string, query: string, options: { analyze?: boolean }) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    const analyze = options.analyze ?? false;
+    try {
+      if (engine.type === "mongodb") {
+        if (!isJsonCommand(query)) throw new Error('MongoDB explain requires a JSON command document, e.g. {"find": "collection", "filter": {}}');
+      } else {
+        validateExplainQuery(query, analyze);
+      }
+      if (analyze) console.log(chalk.yellow("⚠  EXPLAIN ANALYZE will execute the query."));
+
+      const result = await connector.explainQuery(engineId, engine, query, { analyze });
+      console.log(chalk.dim(`format: ${result.format} | analyzed: ${result.analyzed}`));
+      if (result.estimatedCost !== undefined) {
+        console.log(chalk.dim(`estimated cost: ${result.estimatedCost} | rows: ${result.estimatedRows ?? "-"}`));
+      }
+      console.log();
+      console.log(result.plan);
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+// ─── slow-queries ────────────────────────────────────────────
+program
+  .command("slow-queries <engineId>")
+  .description("List slow queries from engine internals")
+  .option("--limit <n>", "Max queries to return (default: 10)", "10")
+  .option("--min-duration-ms <ms>", "Min total execution time in ms (default: 1000)", "1000")
+  .action(async (engineId: string, options: { limit: string; minDurationMs: string }) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const queries = await connector.listSlowQueries(engineId, engine, {
+        limit: parseInt(options.limit, 10),
+        minDurationMs: parseInt(options.minDurationMs, 10),
+      });
+      if (queries.length === 0) {
+        console.log(chalk.yellow("No slow queries found (or feature unavailable for this engine)."));
+      } else {
+        const table = new Table({
+          head: [chalk.white("Query"), chalk.white("Execs"), chalk.white("Total"), chalk.white("Avg"), chalk.white("Max"), chalk.white("Rows")],
+          colWidths: [50, 10, 12, 12, 12, 10],
+          wordWrap: true,
+        });
+        for (const q of queries) {
+          table.push([
+            (q.query ?? "").substring(0, 200),
+            q.executionCount?.toLocaleString() ?? "-",
+            formatDuration(q.totalExecutionTimeMs),
+            q.avgExecutionTimeMs != null ? formatDuration(q.avgExecutionTimeMs) : "-",
+            q.maxExecutionTimeMs != null ? formatDuration(q.maxExecutionTimeMs) : "-",
+            q.rowsReturned?.toLocaleString() ?? "-",
+          ]);
+        }
+        console.log(table.toString());
+        console.log(chalk.dim(`${queries.length} slow query(ies)`));
+      }
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+// ─── health-check ────────────────────────────────────────────
+program
+  .command("health-check <engineId>")
+  .description("Run a health check on a database engine")
+  .action(async (engineId: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const checks: { name: string; status: string; message: string; value?: string | number }[] = [];
+
+      // 1. Connectivity
+      try {
+        const probeSql = engine.type === "oracle" ? "SELECT 1 FROM DUAL" : engine.type === "mongodb" ? JSON.stringify({ ping: 1 }) : "SELECT 1";
+        await connector.query(engineId, engine, probeSql);
+        checks.push({ name: "connectivity", status: "pass", message: "Database is reachable" });
+      } catch (e: any) {
+        checks.push({ name: "connectivity", status: "fail", message: e instanceof Error ? e.message : String(e) });
+      }
+
+      // 2. Blocking chains
+      try {
+        const chains = await connector.getBlockingChains(engineId, engine);
+        checks.push({
+          name: "blocking",
+          status: chains.length === 0 ? "pass" : "fail",
+          message: chains.length === 0 ? "No blocking chains" : `${chains.length} blocking chain(s) detected`,
+          value: chains.length,
+        });
+      } catch (e: any) {
+        checks.push({ name: "blocking", status: "skip", message: e instanceof Error ? e.message : String(e) });
+      }
+
+      // 3. Active processes
+      try {
+        const procs = await connector.listProcesses(engineId, engine);
+        checks.push({
+          name: "processes",
+          status: procs.length > 50 ? "warn" : "pass",
+          message: `${procs.length} active process(es)`,
+          value: procs.length,
+        });
+      } catch (e: any) {
+        checks.push({ name: "processes", status: "skip", message: e instanceof Error ? e.message : String(e) });
+      }
+
+      // 4. Slow queries
+      try {
+        const slowQueries = await connector.listSlowQueries(engineId, engine, { limit: 5, minDurationMs: 1000 });
+        checks.push({
+          name: "slow-queries",
+          status: slowQueries.length === 0 ? "pass" : "warn",
+          message: slowQueries.length === 0 ? "No slow queries detected" : `${slowQueries.length} slow query pattern(s) found`,
+          value: slowQueries.length,
+        });
+      } catch (e: any) {
+        checks.push({ name: "slow-queries", status: "skip", message: e instanceof Error ? e.message : String(e) });
+      }
+
+      // Aggregate
+      const hasFail = checks.some((c) => c.status === "fail");
+      const hasWarn = checks.some((c) => c.status === "warn");
+      const status = hasFail ? "critical" : hasWarn ? "warning" : "healthy";
+      const statusColor = status === "critical" ? chalk.red : status === "warning" ? chalk.yellow : chalk.green;
+
+      console.log(statusColor.bold(`  Status: ${status.toUpperCase()}`) + chalk.dim(`  (${engineId} — ${engine.type})`));
+      console.log();
+      const table = new Table({
+        head: [chalk.white("Check"), chalk.white("Status"), chalk.white("Message"), chalk.white("Value")],
+      });
+      for (const c of checks) {
+        const color = c.status === "pass" ? chalk.green : c.status === "fail" ? chalk.red : c.status === "warn" ? chalk.yellow : chalk.dim;
+        table.push([c.name, color(c.status), c.message, c.value != null ? String(c.value) : "-"]);
+      }
+      console.log(table.toString());
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
 // ─── REPL logic (shared by repl and connect commands) ─────────
 async function startRepl(
   config: { engines: Record<string, EngineConfig> },
@@ -669,6 +876,193 @@ async function startRepl(
         }
       },
     },
+    "table-sizes": {
+      desc: "List table sizes (data, index, total) for current database",
+      fn: async (args: string[]) => {
+        const engine = config.engines[currentEngine];
+        const connector = getConnectorForEngine(currentEngine);
+        if (!engine || !connector) {
+          console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+          return;
+        }
+        const database = args[0];
+        try {
+          const sizes = await connector.listTableSizes(currentEngine, engine, database);
+          const table = new Table({
+            head: [chalk.white("Table"), chalk.white("Rows"), chalk.white("Data"), chalk.white("Index"), chalk.white("Total"), chalk.white("Free")],
+          });
+          for (const s of sizes) {
+            table.push([
+              s.name,
+              s.rows?.toLocaleString() ?? "-",
+              formatBytes(s.dataSizeBytes ?? 0),
+              formatBytes(s.indexSizeBytes ?? 0),
+              formatBytes(s.totalSizeBytes),
+              s.dataFreeBytes ? formatBytes(s.dataFreeBytes) : "-",
+            ]);
+          }
+          console.log(table.toString());
+          console.log(chalk.dim(`${sizes.length} table(s)`));
+        } catch (err) {
+          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        }
+      },
+    },
+    explain: {
+      desc: "Show execution plan for a query (explain <query>)",
+      fn: async (args: string[]) => {
+        const engine = config.engines[currentEngine];
+        const connector = getConnectorForEngine(currentEngine);
+        if (!engine || !connector) {
+          console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+          return;
+        }
+        const query = args.join(" ");
+        if (!query) {
+          console.log(chalk.red("Usage: explain <query>"));
+          console.log(chalk.dim('  explain SELECT * FROM users WHERE id = 1'));
+          console.log(chalk.dim('  explain {"find": "users", "filter": {}}  (MongoDB)'));
+          return;
+        }
+        try {
+          if (engine.type === "mongodb") {
+            if (!isJsonCommand(query)) throw new Error('MongoDB explain requires a JSON command document, e.g. {"find": "collection", "filter": {}}');
+          } else {
+            validateExplainQuery(query, false);
+          }
+          const result = await connector.explainQuery(currentEngine, engine, query, { analyze: false });
+          console.log(chalk.dim(`format: ${result.format} | analyzed: ${result.analyzed}`));
+          if (result.estimatedCost !== undefined) {
+            console.log(chalk.dim(`estimated cost: ${result.estimatedCost} | rows: ${result.estimatedRows ?? "-"}`));
+          }
+          console.log();
+          console.log(result.plan);
+        } catch (err) {
+          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        }
+      },
+    },
+    "slow-queries": {
+      desc: "List slow queries from engine internals (slow-queries [--limit N] [--min-ms N])",
+      fn: async (args: string[]) => {
+        const engine = config.engines[currentEngine];
+        const connector = getConnectorForEngine(currentEngine);
+        if (!engine || !connector) {
+          console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+          return;
+        }
+        // Parse optional flags: --limit N, --min-ms N
+        let limit = 10;
+        let minDurationMs = 1000;
+        for (let i = 0; i < args.length; i++) {
+          if (args[i] === "--limit" && args[i + 1]) limit = parseInt(args[i + 1], 10);
+          if (args[i] === "--min-ms" && args[i + 1]) minDurationMs = parseInt(args[i + 1], 10);
+        }
+        try {
+          const queries = await connector.listSlowQueries(currentEngine, engine, { limit, minDurationMs });
+          if (queries.length === 0) {
+            console.log(chalk.yellow("No slow queries found (or feature unavailable for this engine)."));
+          } else {
+            const table = new Table({
+              head: [chalk.white("Query"), chalk.white("Execs"), chalk.white("Total"), chalk.white("Avg"), chalk.white("Max"), chalk.white("Rows")],
+              colWidths: [50, 10, 12, 12, 12, 10],
+              wordWrap: true,
+            });
+            for (const q of queries) {
+              table.push([
+                (q.query ?? "").substring(0, 200),
+                q.executionCount?.toLocaleString() ?? "-",
+                formatDuration(q.totalExecutionTimeMs),
+                q.avgExecutionTimeMs != null ? formatDuration(q.avgExecutionTimeMs) : "-",
+                q.maxExecutionTimeMs != null ? formatDuration(q.maxExecutionTimeMs) : "-",
+                q.rowsReturned?.toLocaleString() ?? "-",
+              ]);
+            }
+            console.log(table.toString());
+            console.log(chalk.dim(`${queries.length} slow query(ies)`));
+          }
+        } catch (err) {
+          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        }
+      },
+    },
+    "health-check": {
+      desc: "Run a health check on the current engine",
+      fn: async () => {
+        const engine = config.engines[currentEngine];
+        const connector = getConnectorForEngine(currentEngine);
+        if (!engine || !connector) {
+          console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+          return;
+        }
+        const checks: { name: string; status: string; message: string; value?: string | number }[] = [];
+
+        // 1. Connectivity
+        try {
+          const probeSql = engine.type === "oracle" ? "SELECT 1 FROM DUAL" : engine.type === "mongodb" ? JSON.stringify({ ping: 1 }) : "SELECT 1";
+          await connector.query(currentEngine, engine, probeSql);
+          checks.push({ name: "connectivity", status: "pass", message: "Database is reachable" });
+        } catch (e: any) {
+          checks.push({ name: "connectivity", status: "fail", message: e instanceof Error ? e.message : String(e) });
+        }
+
+        // 2. Blocking chains
+        try {
+          const chains = await connector.getBlockingChains(currentEngine, engine);
+          checks.push({
+            name: "blocking",
+            status: chains.length === 0 ? "pass" : "fail",
+            message: chains.length === 0 ? "No blocking chains" : `${chains.length} blocking chain(s) detected`,
+            value: chains.length,
+          });
+        } catch (e: any) {
+          checks.push({ name: "blocking", status: "skip", message: e instanceof Error ? e.message : String(e) });
+        }
+
+        // 3. Active processes
+        try {
+          const procs = await connector.listProcesses(currentEngine, engine);
+          checks.push({
+            name: "processes",
+            status: procs.length > 50 ? "warn" : "pass",
+            message: `${procs.length} active process(es)`,
+            value: procs.length,
+          });
+        } catch (e: any) {
+          checks.push({ name: "processes", status: "skip", message: e instanceof Error ? e.message : String(e) });
+        }
+
+        // 4. Slow queries
+        try {
+          const slowQueries = await connector.listSlowQueries(currentEngine, engine, { limit: 5, minDurationMs: 1000 });
+          checks.push({
+            name: "slow-queries",
+            status: slowQueries.length === 0 ? "pass" : "warn",
+            message: slowQueries.length === 0 ? "No slow queries detected" : `${slowQueries.length} slow query pattern(s) found`,
+            value: slowQueries.length,
+          });
+        } catch (e: any) {
+          checks.push({ name: "slow-queries", status: "skip", message: e instanceof Error ? e.message : String(e) });
+        }
+
+        // Aggregate
+        const hasFail = checks.some((c) => c.status === "fail");
+        const hasWarn = checks.some((c) => c.status === "warn");
+        const status = hasFail ? "critical" : hasWarn ? "warning" : "healthy";
+        const statusColor = status === "critical" ? chalk.red : status === "warning" ? chalk.yellow : chalk.green;
+
+        console.log(statusColor.bold(`  Status: ${status.toUpperCase()}`) + chalk.dim(`  (${currentEngine} — ${engine.type})`));
+        console.log();
+        const table = new Table({
+          head: [chalk.white("Check"), chalk.white("Status"), chalk.white("Message"), chalk.white("Value")],
+        });
+        for (const c of checks) {
+          const color = c.status === "pass" ? chalk.green : c.status === "fail" ? chalk.red : c.status === "warn" ? chalk.yellow : chalk.dim;
+          table.push([c.name, color(c.status), c.message, c.value != null ? String(c.value) : "-"]);
+        }
+        console.log(table.toString());
+      },
+    },
     engines: {
       desc: "List configured engines",
       fn: async () => {
@@ -799,6 +1193,7 @@ async function startRepl(
           return;
         }
         try {
+          validateReadOnlySql(sql);
           const result = await connector.query(currentEngine, engine, sql);
           renderResult(result);
         } catch (err) {
@@ -827,6 +1222,10 @@ async function startRepl(
     desc: "describe",
     idx: "indexes",
     ps: "processes",
+    ts: "table-sizes",
+    exp: "explain",
+    sq: "slow-queries",
+    hc: "health-check",
     s: "status",
     q: "quit",
     exit: "quit",
