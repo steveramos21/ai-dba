@@ -25,6 +25,7 @@ describe("health-check tool", () => {
       getBlockingChains: vi.fn().mockResolvedValue([]),
       listProcesses: vi.fn().mockResolvedValue([{ pid: 1 }, { pid: 2 }]),
       listSlowQueries: vi.fn().mockResolvedValue([]),
+      listReplicationStatus: vi.fn().mockResolvedValue({ role: "none", lagSeconds: null, status: "not_configured", errorMessage: null }),
     };
     registerHealthCheckTool(server, config, { mysql: conn as any, postgres: conn as any });
 
@@ -34,7 +35,7 @@ describe("health-check tool", () => {
     expect(body.status).toBe("healthy");
     expect(body.engineId).toBe("mysql-test");
     expect(body.engineType).toBe("mysql");
-    expect(body.checks).toHaveLength(4);
+    expect(body.checks).toHaveLength(5);
     expect(body.checks[0].name).toBe("connectivity");
     expect(body.checks[0].status).toBe("pass");
     expect(body.checks[1].name).toBe("blocking");
@@ -43,6 +44,8 @@ describe("health-check tool", () => {
     expect(body.checks[2].status).toBe("pass");
     expect(body.checks[3].name).toBe("slow-queries");
     expect(body.checks[3].status).toBe("pass");
+    expect(body.checks[4].name).toBe("replication");
+    expect(body.checks[4].status).toBe("skip");
   });
 
   it("returns critical status when blocking chains exist", async () => {
@@ -52,6 +55,7 @@ describe("health-check tool", () => {
       getBlockingChains: vi.fn().mockResolvedValue([{ blocking_pid: 1, blocked_pid: 2 }]),
       listProcesses: vi.fn().mockResolvedValue([]),
       listSlowQueries: vi.fn().mockResolvedValue([]),
+      listReplicationStatus: vi.fn().mockResolvedValue({ role: "none", lagSeconds: null, status: "not_configured", errorMessage: null }),
     };
     registerHealthCheckTool(server, config, { mysql: conn as any, postgres: conn as any });
 
@@ -69,6 +73,7 @@ describe("health-check tool", () => {
       getBlockingChains: vi.fn().mockResolvedValue([]),
       listProcesses: vi.fn().mockResolvedValue([]),
       listSlowQueries: vi.fn().mockResolvedValue([{ id: "q1", query: "SELECT * FROM x", totalExecutionTimeMs: 5000 }]),
+      listReplicationStatus: vi.fn().mockResolvedValue({ role: "none", lagSeconds: null, status: "not_configured", errorMessage: null }),
     };
     registerHealthCheckTool(server, config, { mysql: conn as any, postgres: conn as any });
 

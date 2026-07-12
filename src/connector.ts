@@ -41,6 +41,7 @@ export interface IndexInfo {
 
 export interface ProcessInfo {
   pid: number;
+  serial?: number;  // Oracle only: SERIAL# for ALTER SYSTEM KILL SESSION
   user: string;
   host: string;
   database: string | null;
@@ -96,6 +97,41 @@ export interface SlowQueryInfo {
 export interface SlowQueryOptions {
   limit?: number;
   minDurationMs?: number;
+}
+
+export interface KillResult {
+  success: boolean;
+  found: boolean;           // true = process existed, false = real error or already gone
+  wouldKill?: boolean;      // true for dry-run proposals
+  pid: string;              // process ID (Oracle: "SID,SERIAL#")
+  engineId: string;
+  user?: string;            // process owner
+  database?: string;        // database/schema
+  duration?: string;        // how long the process has been running
+  query?: string;           // truncated query text (500 chars max)
+  command?: string;         // exact kill command executed
+  killedAt?: string;        // ISO timestamp when killed
+  error?: string;           // error message if success=false
+  notes?: string;           // e.g., "Process not found — may have terminated independently"
+}
+
+export interface ReplicationStatus {
+  role: string;             // engine-native: "source" (MySQL), "primary" (PG), etc.
+  lagSeconds: number | null;
+  status: "healthy" | "degraded" | "down" | "not_configured";
+  errorMessage: string | null;
+}
+
+export interface ServerVariable {
+  name: string;
+  value: string;
+  description?: string;
+}
+
+export interface ServerStatusMetric {
+  name: string;
+  value: number | string;
+  description?: string;
 }
 
 export interface HealthCheck {
@@ -163,6 +199,18 @@ export interface DatabaseConnector {
 
   /** Get current blocking chains (blocked sessions + their blockers) */
   getBlockingChains(engineId: string, config: import("./config.js").EngineConfig): Promise<BlockingChain[]>;
+
+  /** Kill a database process/session (with dry-run support) */
+  killProcess(engineId: string, config: import("./config.js").EngineConfig, pid: string, options?: { dryRun?: boolean }): Promise<KillResult>;
+
+  /** Get replication status for this engine */
+  listReplicationStatus(engineId: string, config: import("./config.js").EngineConfig): Promise<ReplicationStatus>;
+
+  /** List server configuration variables (curated subset) */
+  listServerVariables(engineId: string, config: import("./config.js").EngineConfig): Promise<ServerVariable[]>;
+
+  /** List server runtime status metrics (curated subset) */
+  listServerStatus(engineId: string, config: import("./config.js").EngineConfig): Promise<ServerStatusMetric[]>;
 
   /** Close all connection pools for this connector */
   closeAllPools(): Promise<void>;

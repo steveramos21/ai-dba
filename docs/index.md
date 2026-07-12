@@ -47,7 +47,7 @@ node dist/index.js repl
 
 ## Test Results
 
-- **75 unit tests** (URL parsers, MCP tool dispatch, SQL guard validation)
-- **205 integration tests** against live Docker databases (121 Sprint 1-7 + 84 Sprint 8)
-- **280 total tests**, all passing
+- **94 unit tests** (URL parsers, MCP tool dispatch, SQL guard validation)
+- **~235 integration tests** against live Docker databases (121 Sprint 1-7 + 84 Sprint 8 + ~30 Sprint 9)
+- **~330 total tests**, all passing
 - **17 bugs** caught by integration testing (all missed by mocked unit tests)

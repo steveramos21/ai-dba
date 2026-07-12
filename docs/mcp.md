@@ -12,7 +12,7 @@ The server communicates over stdio (JSON-RPC).
 
 ## MCP Tools
 
-Ten tools are registered:
+Fourteen tools are registered:
 
 ### `databases`
 List databases/schemas on an engine.
@@ -70,11 +70,37 @@ List slow queries from engine internals. Returns empty array if the feature is u
 ```
 
 ### `health-check`
-Run a health check — orchestrates connectivity, blocking chains, processes, and slow queries.
+Run a health check — orchestrates connectivity, blocking chains, processes, slow queries, and replication.
 ```json
 {"name": "health-check", "arguments": {"engineId": "my-mysql"}}
 ```
 Returns `status: "healthy" | "warning" | "critical"` with per-check breakdown.
+
+### `kill-process`
+Kill a database session. Dry-run by default (`confirm=false`); set `confirm=true` to execute. Requires `allowWriteOps: true` in config.
+```json
+{"name": "kill-process", "arguments": {"engineId": "my-mysql", "pid": "42", "confirm": false}}
+```
+Oracle uses `"SID,SERIAL#"` format (e.g., `"42,123"`). All kills are logged to `~/.ai-dba/audit.log`.
+
+### `replication-status`
+Get normalized replication status — role, lag seconds, status, and error message.
+```json
+{"name": "replication-status", "arguments": {"engineId": "my-mysql"}}
+```
+Returns `status: "healthy" | "degraded" | "down" | "not_configured"` with engine-native `role`.
+
+### `server-variables`
+List curated server configuration variables (~20-30 key settings per engine).
+```json
+{"name": "server-variables", "arguments": {"engineId": "my-mysql"}}
+```
+
+### `server-status`
+List curated server runtime status metrics (~20-30 key metrics per engine).
+```json
+{"name": "server-status", "arguments": {"engineId": "my-mysql"}}
+```
 
 ## Integration with AI Agents
 

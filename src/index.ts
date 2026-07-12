@@ -440,7 +440,7 @@ program
       });
       for (const p of procs) {
         table.push([
-          p.pid,
+          p.serial ? `${p.pid},${p.serial}` : p.pid,
           p.user,
           p.host,
           p.database ?? chalk.dim("-"),
@@ -624,6 +624,22 @@ program
         checks.push({ name: "slow-queries", status: "skip", message: e instanceof Error ? e.message : String(e) });
       }
 
+      // 5. Replication status
+      try {
+        const repl = await connector.listReplicationStatus(engineId, engine);
+        if (repl.status === "not_configured") {
+          checks.push({ name: "replication", status: "skip", message: "Replication not configured" });
+        } else if (repl.status === "down") {
+          checks.push({ name: "replication", status: "fail", message: repl.errorMessage ?? "Replication down", value: repl.lagSeconds ?? undefined });
+        } else if (repl.status === "degraded") {
+          checks.push({ name: "replication", status: "warn", message: repl.errorMessage ?? `Replication lag: ${repl.lagSeconds}s`, value: repl.lagSeconds ?? undefined });
+        } else {
+          checks.push({ name: "replication", status: "pass", message: "Replication healthy", value: repl.lagSeconds ?? 0 });
+        }
+      } catch (e: any) {
+        checks.push({ name: "replication", status: "skip", message: e instanceof Error ? e.message : String(e) });
+      }
+
       // Aggregate
       const hasFail = checks.some((c) => c.status === "fail");
       const hasWarn = checks.some((c) => c.status === "warn");
@@ -640,6 +656,126 @@ program
         table.push([c.name, color(c.status), c.message, c.value != null ? String(c.value) : "-"]);
       }
       console.log(table.toString());
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+// ─── kill-process ────────────────────────────────────────────
+program
+  .command("kill-process <engineId> <pid>")
+  .description("Kill a database process/session (dry-run by default, use --confirm to execute)")
+  .option("--confirm", "Execute the kill (default: dry-run only)")
+  .action(async (engineId: string, pid: string, options: { confirm?: boolean }) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    if (!engine.allowWriteOps) {
+      console.error(chalk.red(`Write operations disabled for engine "${engineId}". Set allowWriteOps: true in config.yaml.`));
+      process.exit(1);
+    }
+    try {
+      const dryRun = !options.confirm;
+      const result = await connector.killProcess(engineId, engine, pid, { dryRun });
+
+      if (dryRun && result.wouldKill) {
+        console.log(chalk.yellow.bold("\n  Kill Process Proposal"));
+        console.log(chalk.dim("  ────────────────────────"));
+        console.log(`  Engine:    ${engineId}`);
+        console.log(`  PID:       ${pid}`);
+        if (result.user) console.log(`  User:      ${result.user}`);
+        if (result.database) console.log(`  Database:  ${result.database}`);
+        if (result.duration) console.log(`  Duration:  ${result.duration}`);
+        if (result.query) console.log(`  Query:     ${result.query.substring(0, 100)}`);
+        console.log(`  Command:   ${chalk.cyan(result.command)}`);
+        if (result.notes) console.log(chalk.yellow(`  Notes:     ${result.notes}`));
+        console.log();
+        console.log(chalk.dim("  To confirm: add --confirm flag"));
+      } else if (result.success) {
+        console.log(chalk.green(`✓ Process ${pid} killed on ${engineId}`));
+        if (result.notes) console.log(chalk.dim(`  ${result.notes}`));
+      } else {
+        console.log(chalk.red(`✗ Failed: ${result.error}`));
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+// ─── replication-status ──────────────────────────────────────
+program
+  .command("replication-status <engineId>")
+  .description("Show replication status for an engine")
+  .action(async (engineId: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const repl = await connector.listReplicationStatus(engineId, engine);
+      const statusColor = repl.status === "healthy" ? chalk.green : repl.status === "degraded" ? chalk.yellow : repl.status === "down" ? chalk.red : chalk.dim;
+      console.log(`  Role:      ${chalk.cyan(repl.role)}`);
+      console.log(`  Status:    ${statusColor(repl.status)}`);
+      console.log(`  Lag:       ${repl.lagSeconds != null ? `${repl.lagSeconds}s` : chalk.dim("-")}`);
+      if (repl.errorMessage) console.log(`  Error:     ${chalk.red(repl.errorMessage)}`);
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+// ─── server-variables ────────────────────────────────────────
+program
+  .command("server-variables <engineId>")
+  .description("List server configuration variables (curated subset)")
+  .action(async (engineId: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const vars = await connector.listServerVariables(engineId, engine);
+      if (vars.length === 0) {
+        console.log(chalk.yellow("No variables returned (or insufficient privileges)."));
+      } else {
+        const table = new Table({ head: [chalk.white("Variable"), chalk.white("Value"), chalk.white("Description")] });
+        for (const v of vars) {
+          table.push([v.name, v.value, v.description ?? chalk.dim("-")]);
+        }
+        console.log(table.toString());
+        console.log(chalk.dim(`${vars.length} variable(s)`));
+      }
+    } catch (err) {
+      console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+      process.exit(1);
+    } finally {
+      for (const c of Object.values(connectors)) await c.closeAllPools();
+      process.exit(0);
+    }
+  });
+
+// ─── server-status ───────────────────────────────────────────
+program
+  .command("server-status <engineId>")
+  .description("List server runtime status metrics (curated subset)")
+  .action(async (engineId: string) => {
+    const { engine, connector, connectors } = await resolveEngine(engineId);
+    try {
+      const metrics = await connector.listServerStatus(engineId, engine);
+      if (metrics.length === 0) {
+        console.log(chalk.yellow("No metrics returned (or insufficient privileges)."));
+      } else {
+        const table = new Table({ head: [chalk.white("Metric"), chalk.white("Value")] });
+        for (const m of metrics) {
+          table.push([m.name, String(m.value)]);
+        }
+        console.log(table.toString());
+        console.log(chalk.dim(`${metrics.length} metric(s)`));
+      }
     } catch (err) {
       console.error(chalk.red(err instanceof Error ? err.message : String(err)));
       process.exit(1);
@@ -860,7 +996,7 @@ async function startRepl(
           });
           for (const p of procs) {
             table.push([
-              p.pid,
+              p.serial ? `${p.pid},${p.serial}` : p.pid,
               p.user,
               p.host,
               p.database ?? chalk.dim("-"),
@@ -1045,6 +1181,22 @@ async function startRepl(
           checks.push({ name: "slow-queries", status: "skip", message: e instanceof Error ? e.message : String(e) });
         }
 
+        // 5. Replication status
+        try {
+          const repl = await connector.listReplicationStatus(currentEngine, engine);
+          if (repl.status === "not_configured") {
+            checks.push({ name: "replication", status: "skip", message: "Replication not configured" });
+          } else if (repl.status === "down") {
+            checks.push({ name: "replication", status: "fail", message: repl.errorMessage ?? "Replication down", value: repl.lagSeconds ?? undefined });
+          } else if (repl.status === "degraded") {
+            checks.push({ name: "replication", status: "warn", message: repl.errorMessage ?? `Replication lag: ${repl.lagSeconds}s`, value: repl.lagSeconds ?? undefined });
+          } else {
+            checks.push({ name: "replication", status: "pass", message: "Replication healthy", value: repl.lagSeconds ?? 0 });
+          }
+        } catch (e: any) {
+          checks.push({ name: "replication", status: "skip", message: e instanceof Error ? e.message : String(e) });
+        }
+
         // Aggregate
         const hasFail = checks.some((c) => c.status === "fail");
         const hasWarn = checks.some((c) => c.status === "warn");
@@ -1061,6 +1213,153 @@ async function startRepl(
           table.push([c.name, color(c.status), c.message, c.value != null ? String(c.value) : "-"]);
         }
         console.log(table.toString());
+      },
+    },
+    "kill-process": {
+      desc: "Kill a process (kill-process <pid> [--confirm])",
+      fn: async (args: string[]) => {
+        const engine = config.engines[currentEngine];
+        const connector = getConnectorForEngine(currentEngine);
+        if (!engine || !connector) {
+          console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+          return;
+        }
+        if (!engine.allowWriteOps) {
+          console.log(chalk.red(`Write operations disabled for engine "${currentEngine}". Set allowWriteOps: true in config.yaml.`));
+          return;
+        }
+        const confirmFlag = args.includes("--confirm");
+        const pid = args.find((a) => !a.startsWith("--"));
+        if (!pid) {
+          console.log(chalk.red("Usage: kill-process <pid> [--confirm]"));
+          console.log(chalk.dim("  Oracle: kill-process 42,123  (SID,SERIAL# format)"));
+          return;
+        }
+        try {
+          // Dry-run first
+          const proposal = await connector.killProcess(currentEngine, engine, pid, { dryRun: true });
+          if (!proposal.found && !proposal.wouldKill) {
+            console.log(chalk.red(`Error: ${proposal.error ?? "Process not found"}`));
+            return;
+          }
+          // Display proposal
+          console.log(chalk.yellow.bold("\n  Kill Process Proposal"));
+          console.log(chalk.dim("  ────────────────────────"));
+          console.log(`  Engine:    ${currentEngine}`);
+          console.log(`  PID:       ${pid}`);
+          if (proposal.user) console.log(`  User:      ${proposal.user}`);
+          if (proposal.database) console.log(`  Database:  ${proposal.database}`);
+          if (proposal.duration) console.log(`  Duration:  ${proposal.duration}`);
+          if (proposal.query) console.log(`  Query:     ${proposal.query.substring(0, 100)}`);
+          console.log(`  Command:   ${chalk.cyan(proposal.command)}`);
+          if (proposal.notes) console.log(chalk.yellow(`  Notes:     ${proposal.notes}`));
+          console.log();
+
+          // Determine if we should execute
+          let shouldExecute = false;
+          if (confirmFlag) {
+            shouldExecute = true;
+          } else if (process.stdin.isTTY && proposal.found) {
+            const readline = await import("node:readline");
+            const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+            const answer = await new Promise<string>(resolve => rl.question(chalk.yellow("Kill this process? [y/N] "), resolve));
+            rl.close();
+            shouldExecute = answer.toLowerCase() === "y" || answer.toLowerCase() === "yes";
+          } else {
+            console.log(chalk.dim("  To confirm: kill-process <pid> --confirm"));
+            console.log();
+            return;
+          }
+
+          if (!shouldExecute) {
+            console.log(chalk.dim("Cancelled."));
+            return;
+          }
+
+          // Execute
+          const result = await connector.killProcess(currentEngine, engine, pid, { dryRun: false });
+          if (result.success) {
+            console.log(chalk.green(`✓ Process ${pid} killed`));
+            if (result.notes) console.log(chalk.dim(`  ${result.notes}`));
+          } else {
+            console.log(chalk.red(`✗ Failed: ${result.error}`));
+          }
+        } catch (err) {
+          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        }
+      },
+    },
+    "replication-status": {
+      desc: "Show replication status for current engine",
+      fn: async () => {
+        const engine = config.engines[currentEngine];
+        const connector = getConnectorForEngine(currentEngine);
+        if (!engine || !connector) {
+          console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+          return;
+        }
+        try {
+          const repl = await connector.listReplicationStatus(currentEngine, engine);
+          const statusColor = repl.status === "healthy" ? chalk.green : repl.status === "degraded" ? chalk.yellow : repl.status === "down" ? chalk.red : chalk.dim;
+          console.log(`  Role:      ${chalk.cyan(repl.role)}`);
+          console.log(`  Status:    ${statusColor(repl.status)}`);
+          console.log(`  Lag:       ${repl.lagSeconds != null ? `${repl.lagSeconds}s` : chalk.dim("-")}`);
+          if (repl.errorMessage) console.log(`  Error:     ${chalk.red(repl.errorMessage)}`);
+        } catch (err) {
+          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        }
+      },
+    },
+    "server-variables": {
+      desc: "Show server configuration variables (curated)",
+      fn: async () => {
+        const engine = config.engines[currentEngine];
+        const connector = getConnectorForEngine(currentEngine);
+        if (!engine || !connector) {
+          console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+          return;
+        }
+        try {
+          const vars = await connector.listServerVariables(currentEngine, engine);
+          if (vars.length === 0) {
+            console.log(chalk.yellow("No variables returned (or insufficient privileges)."));
+          } else {
+            const table = new Table({ head: [chalk.white("Variable"), chalk.white("Value"), chalk.white("Description")] });
+            for (const v of vars) {
+              table.push([v.name, v.value, v.description ?? chalk.dim("-")]);
+            }
+            console.log(table.toString());
+            console.log(chalk.dim(`${vars.length} variable(s)`));
+          }
+        } catch (err) {
+          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        }
+      },
+    },
+    "server-status": {
+      desc: "Show server runtime status metrics (curated)",
+      fn: async () => {
+        const engine = config.engines[currentEngine];
+        const connector = getConnectorForEngine(currentEngine);
+        if (!engine || !connector) {
+          console.log(chalk.red("No engine selected. Use: connect <url> or use <engineId>"));
+          return;
+        }
+        try {
+          const metrics = await connector.listServerStatus(currentEngine, engine);
+          if (metrics.length === 0) {
+            console.log(chalk.yellow("No metrics returned (or insufficient privileges)."));
+          } else {
+            const table = new Table({ head: [chalk.white("Metric"), chalk.white("Value")] });
+            for (const m of metrics) {
+              table.push([m.name, String(m.value)]);
+            }
+            console.log(table.toString());
+            console.log(chalk.dim(`${metrics.length} metric(s)`));
+          }
+        } catch (err) {
+          console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        }
       },
     },
     engines: {
@@ -1226,6 +1525,10 @@ async function startRepl(
     exp: "explain",
     sq: "slow-queries",
     hc: "health-check",
+    kp: "kill-process",
+    rs: "replication-status",
+    vars: "server-variables",
+    srv: "server-status",
     s: "status",
     q: "quit",
     exit: "quit",

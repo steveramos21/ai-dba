@@ -14,7 +14,12 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  KillResult,
+  ReplicationStatus,
+  ServerVariable,
+  ServerStatusMetric,
 } from "../connector.js";
+import { writeAuditEntry } from "../audit.js";
 
 export class PostgreSQLConnector implements DatabaseConnector {
   private pools: Map<string, Pool> = new Map();
@@ -390,6 +395,202 @@ export class PostgreSQLConnector implements DatabaseConnector {
       await pool.end();
     }
     this.pools.clear();
+  }
+
+  // ─── Sprint 9: Write operations + server diagnostics ───
+
+  async killProcess(engineId: string, config: EngineConfig, pid: string, options?: { dryRun?: boolean }): Promise<KillResult> {
+    const dryRun = options?.dryRun ?? false;
+    const pidNum = parseInt(pid, 10);
+
+    if (isNaN(pidNum) || pidNum <= 0) {
+      return { success: false, found: false, pid, engineId, error: `Invalid PID: "${pid}" — expected a positive integer` };
+    }
+
+    if (!config.allowWriteOps) {
+      return { success: false, found: false, pid, engineId, error: `Write operations disabled for engine "${engineId}". Set allowWriteOps: true in config.yaml.` };
+    }
+
+    const pool = this.getPool(engineId, config);
+    const client = await pool.connect();
+    try {
+      // Look up the process
+      const res = await client.query(
+        "SELECT pid, usename, client_addr, datname, state, query, EXTRACT(EPOCH FROM now() - state_change)::int as time FROM pg_stat_activity WHERE pid = $1",
+        [pidNum]
+      );
+
+      const proc = res.rows[0] as any;
+      const command = `SELECT pg_terminate_backend(${pidNum})`;
+      const queryTrunc = proc?.query ? (proc.query as string).substring(0, 500) : undefined;
+      const durationStr = proc ? `${proc.time ?? 0}s` : undefined;
+
+      // Process not found
+      if (!proc) {
+        if (dryRun) {
+          return { success: false, found: false, wouldKill: true, pid, engineId, command, notes: "Process not found — may have terminated independently" };
+        }
+        // Try to terminate anyway — check error to distinguish "already gone" from real errors
+        try {
+          await client.query(`SELECT pg_terminate_backend(${pidNum})`);
+        } catch (e: any) {
+          const msg = e.message ?? String(e);
+          if (msg.includes("does not exist") || msg.includes("not found") || msg.includes("PID does not exist")) {
+            return { success: true, found: false, pid, engineId, command, killedAt: new Date().toISOString(), notes: "Process not found — may have terminated independently" };
+          }
+          return { success: false, found: false, pid, engineId, command, error: msg };
+        }
+        return { success: true, found: false, pid, engineId, command, killedAt: new Date().toISOString(), notes: "Process not found — may have terminated independently" };
+      }
+
+      // Dry-run: return proposal
+      if (dryRun) {
+        return {
+          success: false, found: true, wouldKill: true, pid, engineId,
+          user: proc.usename, database: proc.datname ?? undefined,
+          duration: durationStr, query: queryTrunc, command,
+        };
+      }
+
+      // Execute the kill
+      try {
+        const killRes = await client.query(`SELECT pg_terminate_backend(${pidNum}) as terminated`);
+        const terminated = (killRes.rows[0] as any)?.terminated === true;
+        const killedAt = new Date().toISOString();
+
+        writeAuditEntry({
+          timestamp: killedAt, action: "kill-process", engineId, pid,
+          user: proc.usename, database: proc.datname ?? undefined,
+          duration: durationStr, query: queryTrunc, command,
+          success: true, killedAt,
+        });
+
+        return {
+          success: true, found: true, pid, engineId,
+          user: proc.usename, database: proc.datname ?? undefined,
+          duration: durationStr, query: queryTrunc, command, killedAt,
+          notes: terminated ? undefined : "pg_terminate_backend returned false — session may have already ended",
+        };
+      } catch (e: any) {
+        const error = e.message ?? String(e);
+        writeAuditEntry({
+          timestamp: new Date().toISOString(), action: "kill-process", engineId, pid,
+          user: proc.usename, database: proc.datname ?? undefined,
+          duration: durationStr, query: queryTrunc, command,
+          success: false, error,
+        });
+        return { success: false, found: true, pid, engineId, user: proc.usename, database: proc.datname ?? undefined, duration: durationStr, query: queryTrunc, command, error };
+      }
+    } finally {
+      client.release();
+    }
+  }
+
+  async listReplicationStatus(engineId: string, config: EngineConfig): Promise<ReplicationStatus> {
+    const pool = this.getPool(engineId, config);
+    const client = await pool.connect();
+    try {
+      // Check if this is a primary with replicas
+      const senderRes = await client.query(
+        "SELECT pid, state, sync_state, sent_lsn, replay_lsn, EXTRACT(EPOCH FROM replay_lag)::int as lag_seconds FROM pg_stat_replication"
+      );
+
+      if (senderRes.rows.length > 0) {
+        // This is a primary/source
+        const maxLag = Math.max(...senderRes.rows.map((r: any) => r.lag_seconds ?? 0));
+        return {
+          role: "primary",
+          lagSeconds: maxLag > 0 ? maxLag : 0,
+          status: maxLag > 60 ? "degraded" : "healthy",
+          errorMessage: null,
+        };
+      }
+
+      // Check if this is a replica
+      const receiverRes = await client.query(
+        "SELECT status, sender_host, slot_name, latest_end_lsn, latest_end_time, EXTRACT(EPOCH FROM (now() - latest_end_time))::int as lag_seconds FROM pg_stat_wal_receiver"
+      );
+
+      if (receiverRes.rows.length > 0) {
+        const r = receiverRes.rows[0] as any;
+        const lag = r.lag_seconds ?? 0;
+        if (r.status !== "streaming") {
+          return { role: "replica", lagSeconds: lag, status: "down", errorMessage: `Replication status: ${r.status}` };
+        }
+        if (lag > 60) {
+          return { role: "replica", lagSeconds: lag, status: "degraded", errorMessage: null };
+        }
+        return { role: "replica", lagSeconds: lag, status: "healthy", errorMessage: null };
+      }
+
+      return { role: "none", lagSeconds: null, status: "not_configured", errorMessage: null };
+    } catch (e: any) {
+      // pg_stat_replication may not be accessible
+      return { role: "none", lagSeconds: null, status: "not_configured", errorMessage: e.message ?? String(e) };
+    } finally {
+      client.release();
+    }
+  }
+
+  async listServerVariables(engineId: string, config: EngineConfig): Promise<ServerVariable[]> {
+    const pool = this.getPool(engineId, config);
+    const client = await pool.connect();
+    try {
+      const res = await client.query(
+        `SELECT name, setting as value, short_desc as description
+        FROM pg_settings
+        WHERE name IN (
+          'server_version', 'max_connections', 'shared_buffers', 'work_mem',
+          'maintenance_work_mem', 'effective_cache_size', 'wal_buffers',
+          'log_min_duration_statement', 'checkpoint_timeout', 'max_wal_size',
+          'random_page_cost', 'default_statistics_target', 'autovacuum',
+          'track_activities', 'track_counts', 'listen_addresses',
+          'timezone', 'data_checksums', 'hot_standby', 'wal_level',
+          'max_replication_slots', 'max_wal_senders', 'synchronous_commit',
+          'statement_timeout', 'idle_in_transaction_session_timeout',
+          'lock_timeout', 'log_connections', 'log_disconnections'
+        )
+        ORDER BY name`
+      );
+      return res.rows.map((row: any) => ({
+        name: row.name,
+        value: String(row.value ?? ""),
+        description: row.description ?? undefined,
+      }));
+    } finally {
+      client.release();
+    }
+  }
+
+  async listServerStatus(engineId: string, config: EngineConfig): Promise<ServerStatusMetric[]> {
+    const pool = this.getPool(engineId, config);
+    const client = await pool.connect();
+    try {
+      const res = await client.query(
+        `SELECT 'xact_commit' as name, xact_commit::text as value FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'xact_rollback', xact_rollback::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'blks_read', blks_read::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'blks_hit', blks_hit::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'tup_returned', tup_returned::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'tup_fetched', tup_fetched::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'tup_inserted', tup_inserted::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'tup_updated', tup_updated::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'tup_deleted', tup_deleted::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'conflicts', conflicts::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'temp_files', temp_files::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'deadlocks', deadlocks::text FROM pg_stat_database WHERE datname = current_database()
+        UNION ALL SELECT 'numbackends', count(*)::text FROM pg_stat_activity WHERE datname = current_database()
+        UNION ALL SELECT 'active_queries', count(*)::text FROM pg_stat_activity WHERE state = 'active' AND datname = current_database()
+        UNION ALL SELECT 'idle_in_transaction', count(*)::text FROM pg_stat_activity WHERE state = 'idle in transaction' AND datname = current_database()`
+      );
+      return res.rows.map((row: any) => {
+        const val = row.value;
+        const numVal = Number(val);
+        return { name: row.name, value: isNaN(numVal) ? String(val ?? "") : numVal };
+      });
+    } finally {
+      client.release();
+    }
   }
 }
 
