@@ -558,9 +558,11 @@ export class MySQLConnector implements DatabaseConnector {
           'autocommit', 'sql_mode', 'time_zone', 'system_time_zone',
           'innodb_flush_log_at_trx_commit', 'innodb_file_per_table', 'thread_cache_size',
           'table_open_cache', 'max_connect_errors', 'connect_timeout'
-        ) ORDER BY Variable_name`
+        )`
       );
-      return rows.map((row: any) => ({ name: row.Variable_name, value: String(row.Value ?? "") }));
+      return rows
+        .map((row: any) => ({ name: row.Variable_name, value: String(row.Value ?? "") }))
+        .sort((a, b) => a.name.localeCompare(b.name));
     } finally {
       connection.release();
     }
@@ -579,13 +581,15 @@ export class MySQLConnector implements DatabaseConnector {
           'Innodb_buffer_pool_pages_free', 'Innodb_buffer_pool_pages_total',
           'Bytes_received', 'Bytes_sent', 'Created_tmp_disk_tables',
           'Opened_tables', 'Open_tables', 'Table_locks_waited', 'Select_full_join'
-        ) ORDER BY Variable_name`
+        )`
       );
-      return rows.map((row: any) => {
-        const val = row.Value;
-        const numVal = Number(val);
-        return { name: row.Variable_name, value: isNaN(numVal) ? String(val ?? "") : numVal };
-      });
+      return rows
+        .map((row: any) => {
+          const val = row.Value;
+          const numVal = Number(val);
+          return { name: row.Variable_name, value: isNaN(numVal) ? String(val ?? "") : numVal };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
     } finally {
       connection.release();
     }
