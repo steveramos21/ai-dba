@@ -1,26 +1,61 @@
-// Cold-start regression test — measures MCP handshake time and CLI cold start.
-// Usage: node test/mcp-coldstart.mjs
-// Env:   COLDSTART_THRESHOLD_MS (default 8000) — fail above this
-//        COLDSTART_TIMEOUT_MS   (default 90000) — abort a measurement stuck this long
+// Cold-start + lazy-import regression guard.
 //
-// The MCP handshake (initialize -> tools/list) is what EVERY agent session pays
-// before the first tool is usable, and CLI startup is what every scripted DBA
-// action pays. Both must stay fast: connector driver modules load on first
-// connection, never at startup.
+// Two checks, both about startup behavior:
+//   1. dist static-import scan — no static imports of DB drivers anywhere in
+//      dist/**/*.js. Environment-independent; catches eager driver loading
+//      regardless of how fast the filesystem is.
+//   2. Latency — MCP handshake (initialize -> tools/list) and CLI cold start
+//      stay under a threshold. The five drivers cost ~27 s combined on this
+//      project's WSL 9p mounts; an eager driver import blows through any
+//      sane ceiling.
 //
-// CI-safe: this script generates its own throwaway config (config.yaml is
-// gitignored, so CI runners don't have one). Pools are lazy, so tools/list
-// never touches a database.
+// Thresholds: 8000 ms native, 12000 ms on WSL /mnt/* (9p module resolution is
+// ~50x slower and the MCP SDK import alone accounts for ~7 s there). Both
+// ceilings still catch an eager driver import with large margin. Override with
+// COLDSTART_THRESHOLD_MS; hard abort per measurement via COLDSTART_TIMEOUT_MS.
+//
+// CI-safe: generates its own throwaway config (config.yaml is gitignored, so
+// CI runners don't have one). Pools are lazy — tools/list never touches a DB.
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { readdirSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 
-const THRESHOLD_MS = Number(process.env.COLDSTART_THRESHOLD_MS || 8000);
+const isNineP = /^\/mnt\//.test(process.cwd());
+const DEFAULT_THRESHOLD_MS = isNineP ? 12000 : 8000;
+const THRESHOLD_MS = Number(process.env.COLDSTART_THRESHOLD_MS || DEFAULT_THRESHOLD_MS);
 const TIMEOUT_MS = Number(process.env.COLDSTART_TIMEOUT_MS || 90000);
+const DIST = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 
-// Throwaway config — one dummy engine; never connected (pools are lazy).
+// ─── Check 1: static driver imports in dist ──────────────────
+const DRIVER_RE = /(?:from\s+|require\()\s*["'](mysql2(?:\/promise)?|pg|tedious|oracledb|mongodb)["']/;
+
+function scanDist(dir, hits = []) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return hits;
+  }
+  for (const e of entries) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) scanDist(p, hits);
+    else if (e.name.endsWith(".js")) {
+      for (const line of readFileSync(p, "utf8").split("\n")) {
+        const t = line.trim();
+        if (t.startsWith("//")) continue;
+        if (DRIVER_RE.test(t)) hits.push(`${p.replace(DIST + "/", "dist/")}: ${t.slice(0, 110)}`);
+      }
+    }
+  }
+  return hits;
+}
+
+const staticHits = scanDist(DIST);
+
+// ─── Check 2: latency ────────────────────────────────────────
 const cfgDir = mkdtempSync(join(tmpdir(), "ai-dba-coldstart-"));
 const cfgPath = join(cfgDir, "config.yaml");
 writeFileSync(
@@ -118,7 +153,17 @@ try {
   // best-effort cleanup
 }
 
+console.log(
+  `Filesystem: ${isNineP ? "WSL /mnt (9p) — raised ceiling" : "native"}  |  threshold: ${THRESHOLD_MS} ms`
+);
+
 const results = [
+  {
+    name: "dist static driver-import scan",
+    ms: 0,
+    ok: staticHits.length === 0,
+    detail: staticHits.length ? staticHits.join(" | ") : "clean",
+  },
   {
     name: "MCP tools/list",
     ms: mcp.ms,
