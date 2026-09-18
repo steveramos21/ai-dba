@@ -14,7 +14,7 @@ This guide covers manual testing procedures for all sprints. Each section reflec
 | 6 | MongoDB connector | MERGED | [Sprint 6 - MongoDB](#sprint-6-mongodb) |
 | 8 | Query performance & health | COMPLETE | [Sprint 8 - Performance](#sprint-8-query-performance-health) |
 
-**Test totals:** 96 unit tests + 121 integration tests + 84 Sprint 8 integration tests + ~30 Sprint 9 integration tests = ~330 tests, all passing.
+**Test totals:** 96 unit tests + 121 integration (Sprints 1-7) + 84 (Sprint 8) + 115 (Sprint 9) + 21 blocking = 437 tests, all passing.
 
 ## Prerequisites (all sprints)
 

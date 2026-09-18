@@ -400,3 +400,45 @@ _None — all Sprint 8 features are complete._
 - **MongoDB killProcess:** Cannot filter `currentOp` by opid — fetch all ops client-side
 - **MySQL duplicate return:** Syntax error from patch conflict — removed orphaned line
 - **Integration test imports:** ESM dynamic import patterns verified against existing `.mjs` files
+
+---
+
+## Sprint 10 — Trust & Speed, Part 1: Startup + Harness Integrity (COMPLETE)
+
+**Goal**: Kill the startup cost every agent session and CLI invocation pays, and make the Sprint 9 integration suite actually runnable end-to-end.
+
+### What was built
+- **Lazy driver loading** — all five drivers (mysql2, pg, tedious, oracledb, mongodb) load via `await import()` on first connection, never at module load. `tedious` alone drags in `@azure/identity` (~14s on WSL 9p).
+- **`connector-map.ts`** — `buildConnectorMap()` + `shutdown()` moved out of `server.ts`; the CLI path no longer imports the MCP SDK (~7s import). `server.ts` re-exports both for compatibility.
+- **Concurrent-cold-start de-duplication** — `getPool`/`getConnection`/`getClient` cache an in-flight creation promise per engine; parallel tool calls create exactly one pool/client.
+- **Cold-start regression guard** — `npm run test:coldstart`: (1) scans `dist/**/*.js` for static driver imports (must be zero), (2) measures MCP `tools/list` + CLI cold start against a threshold (8s native / 12s on WSL 9p, printed loudly; `COLDSTART_THRESHOLD_MS` override). Wired into CI.
+- **+2 unit tests** — MySQL/PostgreSQL cold-start de-dup (drivers mocked via `vi.mock` + `vi.hoisted`). 96 total.
+
+### Bugs found & fixed en route
+- **MySQL 8 rejects `ORDER BY` on `SHOW VARIABLES/STATUS`** — `listServerVariables` / `listServerStatus` were broken on MySQL 8 (syntax error). Fixed with client-side sort.
+- **pg pool had no `error` handler** — termination of an idle pooled client (server restart / admin kill) would crash a long-running `serve`. Handler added.
+- **Sprint 9 suite hang (pre-existing on main)** — raw `tedious.Connection` was never `connect()`ed (tedious doesn't auto-connect, so the promise never settled); kill-induced terminations produced unhandled rejections (fatal on Node >= 18); MongoDB victim matched an arbitrary opid (killOp no-op, cleanup hang); suite had no watchdog. All fixed — the suite's first complete run is in the Sprint 10 PR.
+- **Oracle test-container privileges** — the sprint9 suite needs `SELECT ANY DICTIONARY`, `EXECUTE ON SYS.DBMS_LOCK`, `ALTER SYSTEM` for `testuser`. Added `test/oracle-grants.sql`; re-apply after `docker compose down -v`.
+
+### Evidence (WSL /mnt 9p; guard ceiling there 12000 ms)
+| Surface | Before (main @ ff9ec74) | After |
+|---------|-------------------------|-------|
+| MCP `tools/list` handshake | 31,568 ms | 8,105-9,266 ms (~3.6x) |
+| CLI cold start | 31,623 ms | 758-909 ms (~38x) |
+| Static driver imports in `dist/` | 5 eager | 0 (CI-enforced) |
+| Sprint 9 integration suite | hung indefinitely | 115 passed / 0 failed |
+
+Residual ~8 s MCP startup on 9p is the MCP SDK import itself (~6.8 s standalone there), not driver code; native filesystems are far below the 8 s ceiling.
+
+### Final test results
+- Build clean (tsc, 0 errors)
+- **96 unit tests** / 19 files
+- Cold-start guard 3/3
+- Integration: 121 (Sprints 1-7) + 84 (Sprint 8) + 21 (blocking) + 115 (Sprint 9) = 437 total, all passing
+
+### Deferred to "Trust & Speed, Part 2"
+- Safety layer: row limits (default 1000 + honest truncation flag) and per-engine query/connect timeouts
+- Scriptability: `--json` on all CLI commands, health-check exit codes (0/1/2), `health-check --all`
+- health-check consolidation (logic duplicated across CLI/REPL/MCP paths)
+- LICENSE + npm packaging metadata (`bin`, `files`, `repository`)
+- Docs auto-deploy on CI (gh-pages stale since Sprint 8)

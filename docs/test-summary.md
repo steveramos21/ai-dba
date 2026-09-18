@@ -8,8 +8,8 @@
 | Cold-start guard | 3 checks | `npm run test:coldstart` |
 | Integration tests (Sprints 1-7) | 121 | `npm run test:integration` |
 | Integration tests (Sprint 8) | 84 | `npm run test:integration:sprint8` |
-| Integration tests (Sprint 9) | ~30 | `npm run test:integration:sprint9` |
-| **Total** | **~330** | |
+| Integration tests (Sprint 9) | 115 | `npm run test:integration:sprint9` |
+| **Total** | **437** | |
 
 ## Unit Tests
 
