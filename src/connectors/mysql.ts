@@ -26,7 +26,15 @@ import { writeAuditEntry } from "../audit.js";
 // startup free of driver cost. Guarded by npm run test:coldstart.
 let driverPromise: Promise<typeof import("mysql2/promise")> | undefined;
 function loadDriver(): Promise<typeof import("mysql2/promise")> {
-  return (driverPromise ??= import("mysql2/promise"));
+  if (!driverPromise) {
+    driverPromise = import("mysql2/promise").catch((err) => {
+      // Clear the memo on failure so a later call can retry — a transient load
+      // failure must not poison the connector for the process lifetime.
+      driverPromise = undefined;
+      throw err;
+    });
+  }
+  return driverPromise;
 }
 
 export class MySQLConnector implements DatabaseConnector {

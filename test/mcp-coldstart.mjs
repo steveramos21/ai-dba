@@ -9,9 +9,10 @@
 //      project's WSL 9p mounts; an eager driver import blows through any
 //      sane ceiling.
 //
-// Thresholds: 8000 ms native, 12000 ms on WSL /mnt/* (9p module resolution is
-// ~50x slower and the MCP SDK import alone accounts for ~7 s there). Both
-// ceilings still catch an eager driver import with large margin. Override with
+// Thresholds: 8000 ms native, 15000 ms on WSL /mnt/* (9p module resolution is
+// ~50x slower and the MCP SDK import alone accounts for ~7 s there; measured up
+// to ~11.2 s at HEAD). Both ceilings still catch an eager driver import
+// (~31.5 s) with large margin. Override with
 // COLDSTART_THRESHOLD_MS; hard abort per measurement via COLDSTART_TIMEOUT_MS.
 //
 // CI-safe: generates its own throwaway config (config.yaml is gitignored, so
@@ -24,13 +25,13 @@ import { fileURLToPath } from "node:url";
 import { performance } from "node:perf_hooks";
 
 const isNineP = /^\/mnt\//.test(process.cwd());
-const DEFAULT_THRESHOLD_MS = isNineP ? 12000 : 8000;
+const DEFAULT_THRESHOLD_MS = isNineP ? 15000 : 8000;
 const THRESHOLD_MS = Number(process.env.COLDSTART_THRESHOLD_MS || DEFAULT_THRESHOLD_MS);
 const TIMEOUT_MS = Number(process.env.COLDSTART_TIMEOUT_MS || 90000);
 const DIST = join(dirname(fileURLToPath(import.meta.url)), "..", "dist");
 
 // ─── Check 1: static driver imports in dist ──────────────────
-const DRIVER_RE = /(?:from\s+|require\()\s*["'](mysql2(?:\/promise)?|pg|tedious|oracledb|mongodb)["']/;
+const DRIVER_RE = /(?:from\s+|require\(|import\s*)["'](mysql2(?:\/promise)?|pg|tedious|oracledb|mongodb)["']/; // bare side-effect imports included
 
 function scanDist(dir, hits = []) {
   let entries;
@@ -122,13 +123,15 @@ function measureMcpHandshake() {
 }
 
 // CLI cold start: the unknown-engine error path exercises config load + the
-// connector map without touching a database.
+// connector map without touching a database. The stderr message is asserted
+// so a fast boot-crash can't pass as success.
 function measureCli() {
   return new Promise((resolve) => {
     const t0 = performance.now();
     const child = spawn("node", ["dist/index.js", "--config", cfgPath, "health-check", "__coldstart_probe__"], {
       stdio: ["ignore", "ignore", "pipe"],
     });
+    let stderr = "";
     const timer = setTimeout(() => {
       child.kill();
       resolve({ ok: false, ms: performance.now() - t0, error: `CLI did not exit within ${TIMEOUT_MS}ms` });
@@ -137,9 +140,21 @@ function measureCli() {
       clearTimeout(timer);
       resolve({ ok: false, ms: performance.now() - t0, error: err.message });
     });
-    child.on("exit", () => {
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    // "close" (not "exit"): fires only after stdio drains, so the stderr
+    // assertion can't race a final unflushed chunk.
+    child.on("close", () => {
       clearTimeout(timer);
-      resolve({ ok: true, ms: performance.now() - t0 });
+      // The probe's intended path exits 1 with "Unknown engine" — exit code alone
+      // can't tell it apart from a fast boot crash, so assert the message.
+      const ok = stderr.includes("Unknown engine");
+      resolve({
+        ok,
+        ms: performance.now() - t0,
+        error: ok ? undefined : `expected "Unknown engine" on stderr, got: ${stderr.trim().slice(0, 200) || "(empty)"}`,
+      });
     });
   });
 }

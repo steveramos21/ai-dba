@@ -25,12 +25,10 @@ const engines = {
 const connectors = { mysql: mysqlConnector, postgres: postgresConnector, sqlserver: sqlserverConnector, oracle: oracleConnector, mongodb: mongodbConnector };
 
 let passed = 0, failed = 0;
-const results = [];
 
 function assert(name, cond, detail = '') {
   const line = cond ? `  PASS  ${name}` : `  FAIL  ${name}  ${detail}`;
   if (cond) passed++; else failed++;
-  results.push(line);
   console.log(line); // stream live — a hang must be localizable from the log
 }
 

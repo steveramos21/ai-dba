@@ -435,7 +435,12 @@ Residual ~8 s MCP startup on 9p is the MCP SDK import itself (~6.8 s standalone 
 - Build clean (tsc, 0 errors)
 - **96 unit tests** / 19 files
 - Cold-start guard 3/3
-- Integration: 121 (Sprints 1-7) + 84 (Sprint 8) + 21 (blocking) + 115 (Sprint 9) = 437 total, all passing
+- Integration: 121 (Sprints 1-7) + 84 (Sprint 8) + 21 (blocking) + 115 (Sprint 9) = 341 integration tests; + 96 unit tests = 437 total, all passing
+
+### Review round (2026-09-19)
+- Independent review of `ff9ec74..271758b`: **4/5 — no blockers, no majors** (9 findings: 5 minor, 4 nit).
+- Fixed: driver-load memo retry (all 5 connectors), guard side-effect-import regex, CLI stderr assertion, 9p ceiling 12s→15s, test-math in this file, sprint9 dead code.
+- Accepted with rationale (see PR #23): oracle victim fallback (test-only), `.gitignore` symlink pattern (intentional).
 
 ### Deferred to "Trust & Speed, Part 2"
 - Safety layer: row limits (default 1000 + honest truncation flag) and per-engine query/connect timeouts
@@ -443,3 +448,4 @@ Residual ~8 s MCP startup on 9p is the MCP SDK import itself (~6.8 s standalone 
 - health-check consolidation (logic duplicated across CLI/REPL/MCP paths)
 - LICENSE + npm packaging metadata (`bin`, `files`, `repository`)
 - Docs auto-deploy on CI (gh-pages stale since Sprint 8)
+- Behavioral test for the driver-load retry path (vitest factory-caching semantics need validation) — deferred with the 3 connector parity tests

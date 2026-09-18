@@ -24,7 +24,15 @@ import { writeAuditEntry } from "../audit.js";
 // startup free of driver cost. Guarded by npm run test:coldstart.
 let driverPromise: Promise<typeof import("oracledb")> | undefined;
 function loadDriver(): Promise<typeof import("oracledb")> {
-  return (driverPromise ??= import("oracledb"));
+  if (!driverPromise) {
+    driverPromise = import("oracledb").catch((err) => {
+      // Clear the memo on failure so a later call can retry — a transient load
+      // failure must not poison the connector for the process lifetime.
+      driverPromise = undefined;
+      throw err;
+    });
+  }
+  return driverPromise;
 }
 
 /**
