@@ -407,7 +407,7 @@ node dist/index.js --config config.yaml blocking-chains oracle-test --json
 
 ### Known Issues
 
-- **v$ permission fallback:** `listProcesses` and `getBlockingChains` require SELECT ANY DICTIONARY. Without it, they return empty arrays (ORA-00942/ORA-01031 caught gracefully). Grant with: `GRANT SELECT ANY DICTIONARY TO testuser;`
+- **v$ permission fallback:** `listProcesses` and `getBlockingChains` require SELECT ANY DICTIONARY. Without it, they return empty arrays (ORA-00942/ORA-01031 caught gracefully). Grant with: `GRANT SELECT ANY DICTIONARY TO testuser;` The sprint9 kill/observability tests need the full set — apply `test/oracle-grants.sql` (adds DBMS_LOCK + ALTER SYSTEM).
 - **Bind variable names:** `:table` is a reserved bind variable in oracledb. The connector uses `:tbl` instead. Column aliases (`AS name`) also conflict — the connector uses positional indexing (row[0], row[1], etc.).
 - **Uppercase identifiers:** Oracle stores identifiers in uppercase by default. Table names, column names, and index names come back uppercase. The integration test assertions handle both cases.
 - **user_objects vs all_objects:** `user_objects` has no `OWNER` column. The connector uses `USER AS schema` for the default case and `all_objects` (which has `OWNER`) for schema-filtered queries.

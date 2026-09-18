@@ -210,10 +210,19 @@ async function testKillProcessReal(engineId, engineConfig, connector) {
       const client = new MongoClient('mongodb://testuser:testpassword@127.0.0.1:12017/testdb?authSource=admin');
       await client.connect();
       const db = client.db('testdb');
-      const victimPromise = db.collection('blocking_test').find({ $where: 'sleep(30000) || true' }).toArray().catch(() => {});
+      // Make the scan self-sufficient: ensure at least one document exists (idempotent).
+      await db.collection('blocking_test').updateOne({ _id: 'ai-dba-kill-victim' }, { $set: { marker: 'ai-dba-kill-victim' } }, { upsert: true });
+      // $where runs one server-side sleep per scanned document. maxTimeMS makes the
+      // scan self-terminate even if killOp is ignored, so it can never hang the suite.
+      const victimPromise = db.collection('blocking_test')
+        .find({ $where: 'sleep(5000) || true' })
+        .maxTimeMS(25000)
+        .toArray().catch(() => {});
       await new Promise(r => setTimeout(r, 2000));
       const procs = await connector.listProcesses(engineId, engineConfig);
-      const victim = procs.find(p => p.pid && p.pid > 0);
+      // Match OUR victim by its command marker — "first positive opid" can be any op
+      // (internal, or another connection's), making killOp a no-op and hanging cleanup.
+      const victim = procs.find(p => p.pid && p.pid > 0 && (p.query?.includes('sleep(5000)') || p.query?.includes('$where')));
       if (victim) {
         victimPid = String(victim.pid);
         const dryRun = await connector.killProcess(engineId, engineConfig, victimPid, { dryRun: true });
@@ -224,8 +233,9 @@ async function testKillProcessReal(engineId, engineConfig, connector) {
       } else {
         assert(`${label} victim op found`, false, 'No operations visible in currentOp (may need clusterOps privilege)');
       }
-      try { await victimPromise; } catch {}
-      try { await client.close(); } catch {}
+      // Bounded cleanup: neither the victim op nor the client close may hang the suite.
+      await Promise.race([victimPromise, new Promise(r => setTimeout(r, 15000))]);
+      try { await Promise.race([client.close(), new Promise(r => setTimeout(r, 5000))]); } catch {}
     }
 
     if (!victimPid) {
