@@ -346,7 +346,7 @@ export class OracleConnector implements DatabaseConnector {
           executions       AS exec_count,
           elapsed_time     AS total_time_us,
           elapsed_time / NULLIF(executions, 0) AS avg_time_us,
-          max_elapsed_time AS max_time_us,
+          NULL AS max_time_us, -- v$sqlarea has no per-query max_elapsed_time (SQL Server DMV name); null keeps positional indices stable
           disk_reads,
           buffer_gets,
           rows_processed   AS rows_returned
@@ -364,7 +364,7 @@ export class OracleConnector implements DatabaseConnector {
         executionCount: Number(row[2]) || undefined,
         totalExecutionTimeMs: Math.round(Number(row[3]) / 1000),
         avgExecutionTimeMs: row[4] ? Math.round(Number(row[4]) / 1000) : undefined,
-        maxExecutionTimeMs: Math.round(Number(row[5]) / 1000),
+        maxExecutionTimeMs: row[5] != null ? Math.round(Number(row[5]) / 1000) : undefined,
         rowsReturned: Number(row[8]) || undefined,
       }));
     } catch (e: any) {
