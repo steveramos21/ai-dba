@@ -113,6 +113,22 @@ export function registerHealthCheckTool(
         checks.push({ name: "slow-queries", status: "skip", message: e instanceof Error ? e.message : String(e) });
       }
 
+      // 5. Replication status — new in Sprint 9
+      try {
+        const repl = await connector.listReplicationStatus(engineId, engine);
+        if (repl.status === "not_configured") {
+          checks.push({ name: "replication", status: "skip", message: "Replication not configured" });
+        } else if (repl.status === "down") {
+          checks.push({ name: "replication", status: "fail", message: repl.errorMessage ?? "Replication down", value: repl.lagSeconds ?? undefined });
+        } else if (repl.status === "degraded") {
+          checks.push({ name: "replication", status: "warn", message: repl.errorMessage ?? `Replication lag: ${repl.lagSeconds}s`, value: repl.lagSeconds ?? undefined });
+        } else {
+          checks.push({ name: "replication", status: "pass", message: "Replication healthy", value: repl.lagSeconds ?? 0 });
+        }
+      } catch (e: any) {
+        checks.push({ name: "replication", status: "skip", message: e instanceof Error ? e.message : String(e) });
+      }
+
       // Aggregate status: critical if any fail, warning if any warn, healthy if all pass
       const hasFail = checks.some((c) => c.status === "fail");
       const hasWarn = checks.some((c) => c.status === "warn");

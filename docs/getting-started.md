@@ -76,7 +76,7 @@ docker compose up -d
 ## Verify Installation
 
 ```bash
-npm test          # 75 unit tests
+npm test          # 94 unit tests
 npm run build     # TypeScript compiles
 node dist/index.js --version  # Should print version
 ```

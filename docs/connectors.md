@@ -1,6 +1,6 @@
 # Connectors
 
-AI-DBA supports five database engines, each implementing the `DatabaseConnector` interface with ten methods.
+AI-DBA supports five database engines, each implementing the `DatabaseConnector` interface with fourteen methods.
 
 ## Interface
 
@@ -18,6 +18,10 @@ All connectors implement:
 | `listTableSizes` | Table size breakdown (rows, data bytes, index bytes, total bytes) |
 | `explainQuery` | Execution plan analysis (EXPLAIN, optional ANALYZE) |
 | `listSlowQueries` | Slow query data from engine internals |
+| `killProcess` | Kill a session (dry-run + confirm, audit logged) |
+| `listReplicationStatus` | Normalized replication role/lag/status |
+| `listServerVariables` | Curated server config variables |
+| `listServerStatus` | Curated server runtime metrics |
 
 ## MySQL
 
@@ -126,6 +130,10 @@ my-mongo:
 | listTableSizes | info_schema | pg_relation_size | sp_spaceused | all_segments | collStats |
 | explainQuery | FORMAT=JSON | FORMAT JSON | SHOWPLAN_XML | EXPLAIN PLAN | explain cmd |
 | listSlowQueries | perf_schema | pg_stat_statements† | dm_exec_query_stats‡ | v$sqlarea* | currentOp |
+| killProcess | KILL | pg_terminate_backend | KILL | ALTER SYSTEM KILL SESSION | killOp |
+| listReplicationStatus | SHOW REPLICA STATUS | pg_stat_replication | AlwaysOn AG | Data Guard | replSetGetStatus |
+| listServerVariables | SHOW VARIABLES | pg_settings | sys.configurations | v$parameter | serverStatus |
+| listServerStatus | SHOW STATUS | pg_stat_database | @@ vars + DMVs | v$sysstat | serverStatus |
 | Connection pooling | Yes (mysql2) | Yes (pg.Pool) | No (per-call) | Yes (oracledb pool) | Yes (MongoClient) |
 
 *Requires SELECT ANY DICTIONARY privilege.

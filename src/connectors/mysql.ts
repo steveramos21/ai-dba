@@ -15,7 +15,12 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  KillResult,
+  ReplicationStatus,
+  ServerVariable,
+  ServerStatusMetric,
 } from "../connector.js";
+import { writeAuditEntry } from "../audit.js";
 
 export class MySQLConnector implements DatabaseConnector {
   private pools: Map<string, Pool> = new Map();
@@ -367,6 +372,210 @@ export class MySQLConnector implements DatabaseConnector {
       await pool.end();
     }
     this.pools.clear();
+  }
+
+  // ─── Sprint 9: Write operations + server diagnostics ───
+
+  async killProcess(engineId: string, config: EngineConfig, pid: string, options?: { dryRun?: boolean }): Promise<KillResult> {
+    const dryRun = options?.dryRun ?? false;
+    const pidNum = parseInt(pid, 10);
+
+    if (isNaN(pidNum) || pidNum <= 0) {
+      return { success: false, found: false, pid, engineId, error: `Invalid PID: "${pid}" — expected a positive integer` };
+    }
+
+    // Check allowWriteOps
+    if (!config.allowWriteOps) {
+      return { success: false, found: false, pid, engineId, error: `Write operations disabled for engine "${engineId}". Set allowWriteOps: true in config.yaml.` };
+    }
+
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
+    try {
+      // Look up the process
+      const [rows] = await connection.query<RowDataPacket[]>(
+        "SELECT ID as pid, USER as `user`, HOST as `host`, DB as `database`, COMMAND as `command`, TIME as `time`, STATE as `state`, INFO as `query` FROM INFORMATION_SCHEMA.PROCESSLIST WHERE ID = ?",
+        [pidNum]
+      );
+
+      const proc = rows[0] as any;
+      const command = `KILL ${pidNum}`;
+      const queryTrunc = proc?.query ? (proc.query as string).substring(0, 500) : undefined;
+      const durationStr = proc ? `${proc.time}s` : undefined;
+
+      // Process not found
+      if (!proc) {
+        if (dryRun) {
+          return { success: false, found: false, wouldKill: true, pid, engineId, command, notes: "Process not found — may have terminated independently" };
+        }
+        // Try to kill anyway — check error to distinguish "already gone" from real errors
+        try {
+          await connection.query(`KILL ${pidNum}`);
+        } catch (e: any) {
+          const msg = e.message ?? String(e);
+          if (msg.includes("Unknown thread") || msg.includes("not exist") || msg.includes("not found")) {
+            return { success: true, found: false, pid, engineId, command, killedAt: new Date().toISOString(), notes: "Process not found — may have terminated independently" };
+          }
+          return { success: false, found: false, pid, engineId, command, error: msg };
+        }
+        return { success: true, found: false, pid, engineId, command, killedAt: new Date().toISOString(), notes: "Process not found — may have terminated independently" };
+      }
+
+      // Dry-run: return proposal
+      if (dryRun) {
+        return {
+          success: false,
+          found: true,
+          wouldKill: true,
+          pid,
+          engineId,
+          user: proc.user,
+          database: proc.database ?? undefined,
+          duration: durationStr,
+          query: queryTrunc,
+          command,
+        };
+      }
+
+      // Execute the kill
+      try {
+        await connection.query(`KILL ${pidNum}`);
+        const killedAt = new Date().toISOString();
+
+        // Write audit log
+        writeAuditEntry({
+          timestamp: killedAt,
+          action: "kill-process",
+          engineId,
+          pid,
+          user: proc.user,
+          database: proc.database ?? undefined,
+          duration: durationStr,
+          query: queryTrunc,
+          command,
+          success: true,
+          killedAt,
+        });
+
+        return { success: true, found: true, pid, engineId, user: proc.user, database: proc.database ?? undefined, duration: durationStr, query: queryTrunc, command, killedAt };
+      } catch (e: any) {
+        const error = e.message ?? String(e);
+        writeAuditEntry({
+          timestamp: new Date().toISOString(),
+          action: "kill-process",
+          engineId,
+          pid,
+          user: proc.user,
+          database: proc.database ?? undefined,
+          duration: durationStr,
+          query: queryTrunc,
+          command,
+          success: false,
+          error,
+        });
+        return { success: false, found: true, pid, engineId, user: proc.user, database: proc.database ?? undefined, duration: durationStr, query: queryTrunc, command, error };
+      }
+    } finally {
+      connection.release();
+    }
+  }
+
+  async listReplicationStatus(engineId: string, config: EngineConfig): Promise<ReplicationStatus> {
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
+    try {
+      // MySQL 8.0+ uses SHOW REPLICA STATUS; older uses SHOW SLAVE STATUS
+      let rows: any[] = [];
+      try {
+        const [r] = await connection.query<RowDataPacket[]>("SHOW REPLICA STATUS");
+        rows = r as any[];
+      } catch {
+        try {
+          const [r] = await connection.query<RowDataPacket[]>("SHOW SLAVE STATUS");
+          rows = r as any[];
+        } catch {
+          return { role: "none", lagSeconds: null, status: "not_configured", errorMessage: null };
+        }
+      }
+
+      if (rows.length === 0) {
+        // Could be a source/primary (no replica status) or replication not configured
+        // Check if this is a source by looking for replicas
+        try {
+          const [replRows] = await connection.query<RowDataPacket[]>("SELECT COUNT(*) as cnt FROM performance_schema.replication_connection_status");
+          if ((replRows[0] as any)?.cnt > 0) {
+            return { role: "source", lagSeconds: null, status: "healthy", errorMessage: null };
+          }
+        } catch { /* ignore */ }
+        return { role: "none", lagSeconds: null, status: "not_configured", errorMessage: null };
+      }
+
+      const r = rows[0];
+      const replicaRunning = (r.Replica_IO_Running === "Yes" || r.Slave_IO_Running === "Yes") &&
+                             (r.Replica_SQL_Running === "Yes" || r.Slave_SQL_Running === "Yes");
+      const lag = r.Seconds_Behind_Source ?? r.Seconds_Behind_Master;
+      const lastError = r.Last_IO_Error || r.Last_SQL_Error || null;
+
+      if (!replicaRunning) {
+        return { role: "replica", lagSeconds: lag != null ? Number(lag) : null, status: "down", errorMessage: lastError || "Replication threads not running" };
+      }
+      if (lastError && lastError.length > 0) {
+        return { role: "replica", lagSeconds: lag != null ? Number(lag) : null, status: "degraded", errorMessage: lastError };
+      }
+      if (lag != null && Number(lag) > 60) {
+        return { role: "replica", lagSeconds: Number(lag), status: "degraded", errorMessage: null };
+      }
+
+      return { role: "replica", lagSeconds: lag != null ? Number(lag) : null, status: "healthy", errorMessage: null };
+    } finally {
+      connection.release();
+    }
+  }
+
+  async listServerVariables(engineId: string, config: EngineConfig): Promise<ServerVariable[]> {
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SHOW VARIABLES WHERE Variable_name IN (
+          'version', 'version_comment', 'max_connections', 'innodb_buffer_pool_size',
+          'innodb_log_file_size', 'long_query_time', 'slow_query_log', 'slow_query_log_file',
+          'max_allowed_packet', 'wait_timeout', 'interactive_timeout', 'read_only',
+          'super_read_only', 'character_set_server', 'collation_server',
+          'autocommit', 'sql_mode', 'time_zone', 'system_time_zone',
+          'innodb_flush_log_at_trx_commit', 'innodb_file_per_table', 'thread_cache_size',
+          'table_open_cache', 'max_connect_errors', 'connect_timeout'
+        ) ORDER BY Variable_name`
+      );
+      return rows.map((row: any) => ({ name: row.Variable_name, value: String(row.Value ?? "") }));
+    } finally {
+      connection.release();
+    }
+  }
+
+  async listServerStatus(engineId: string, config: EngineConfig): Promise<ServerStatusMetric[]> {
+    const pool = this.getPool(engineId, config);
+    const connection = await pool.getConnection();
+    try {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SHOW GLOBAL STATUS WHERE Variable_name IN (
+          'Uptime', 'Threads_connected', 'Threads_running', 'Max_used_connections',
+          'Aborted_clients', 'Aborted_connects', 'Connections', 'Queries', 'Questions',
+          'Slow_queries', 'Com_select', 'Com_insert', 'Com_update', 'Com_delete',
+          'Innodb_buffer_pool_read_requests', 'Innodb_buffer_pool_reads',
+          'Innodb_buffer_pool_pages_free', 'Innodb_buffer_pool_pages_total',
+          'Bytes_received', 'Bytes_sent', 'Created_tmp_disk_tables',
+          'Opened_tables', 'Open_tables', 'Table_locks_waited', 'Select_full_join'
+        ) ORDER BY Variable_name`
+      );
+      return rows.map((row: any) => {
+        const val = row.Value;
+        const numVal = Number(val);
+        return { name: row.Variable_name, value: isNaN(numVal) ? String(val ?? "") : numVal };
+      });
+    } finally {
+      connection.release();
+    }
   }
 }
 

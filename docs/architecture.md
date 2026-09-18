@@ -102,7 +102,7 @@ Each connector's `query()` method checks the SQL/command type before executing. 
 ### Unit Tests (vitest)
 - Test URL parsers, MCP tool dispatch logic, and SQL guard validation
 - Use `vi.fn()` mocks — no real database connections
-- 75 tests across 15 files
+- 94 tests across 19 files
 
 ### Integration Tests
 - `integration-all.mjs`: 121 tests covering 7 connector methods (Sprints 1-7)

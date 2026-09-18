@@ -327,7 +327,7 @@ _None — all Sprint 8 features are complete._
 - `HealthCheck` type in `connector.ts` — `name`, `status` (pass/warn/fail/skip), `message`, `value`
 - `HealthCheckResult` type — `status` (healthy/warning/critical), `engineId`, `engineType`, `checks[]`, `timestamp`
 - **No new connector method** — pure tool-level orchestration reusing existing `query()`, `getBlockingChains()`, `listProcesses()`, `listSlowQueries()` methods
-- 4 checks per engine:
+- 5 checks per engine:
   1. **Connectivity** — `SELECT 1` (or `SELECT 1 FROM DUAL` for Oracle, `{ping: 1}` for MongoDB). Fail = critical.
   2. **Blocking chains** — reuses `getBlockingChains()`. Any chains = critical.
   3. **Active processes** — reuses `listProcesses()`. >50 processes = warning.
@@ -338,10 +338,10 @@ _None — all Sprint 8 features are complete._
 - REPL: `health-check` command with alias `hc`
 - 4 unit tests (all pass, blocking = critical, slow queries = warning, unknown engine)
 
-### Final Test Results
-- **75 unit tests** across **15 test files**, all passing
+### Final Test Results (Sprint 8)
+- **75 unit tests** across **15 test files** (Sprint 8 baseline — now 94/19 after Sprint 9)
 - Build clean (`tsc` no errors)
-- 10 MCP tools registered: `blocking-chains`, `databases`, `tables`, `describe-table`, `indexes`, `processes`, `table-sizes`, `explain`, `slow-queries`, `health-check`
+- 10 MCP tools registered (now 14 after Sprint 9)
 - 10 CLI commands, 10 REPL commands (with aliases: `bc`, `ls`, `db`, `dt`, `desc`, `idx`, `ps`, `ts`, `exp`, `sq`, `hc`)
 
 ### Bugs Fixed During Implementation
@@ -351,3 +351,52 @@ _None — all Sprint 8 features are complete._
 - **SQL Server identifier validation**: regex check before string interpolation to prevent injection
 - **MongoDB `explainQuery`**: restored accidentally deleted `try {` block
 - **sql-guard word boundaries**: `\\b` regex instead of space-delimited matching — catches `DELETE FROM x` embedded in SELECT clauses
+
+---
+
+## Sprint 9 — Kill Process + Replication + Server Diagnostics (COMPLETE)
+
+### Scope
+- `kill-process` — guided remediation with dry-run, confirm, audit logging
+- `replication-status` — normalized replication view across all 5 engines
+- `server-variables` — curated config variables (~20-30 per engine)
+- `server-status` — curated runtime metrics (~20-30 per engine)
+- `health-check` — added replication as 5th check
+
+### Key Decisions (24-question grill)
+- **Q5=A (OVERRIDE):** Local JSONL audit log at `~/.ai-dba/audit.log`
+- **Q6=A:** `kill-process` bypasses `sql-guard` entirely
+- **Q21=B:** Per-engine `allowWriteOps: true` opt-in (defaults to `false`)
+- **Q22=C:** REPL TTY-aware confirmation (y/N interactive, `--confirm` piped)
+- **Q24=A:** No log rotation — single append-only file
+
+### New Files (10)
+- `src/audit.ts` — JSONL audit log writer
+- `src/tools/kill-process.ts` + test
+- `src/tools/replication-status.ts` + test
+- `src/tools/server-variables.ts` + test
+- `src/tools/server-status.ts` + test
+- `test/integration-sprint9.mjs` — real kill tests (~30 tests)
+
+### Modified Files (~17)
+- `src/connector.ts` — 4 new methods, 4 new types, `serial?: number` on `ProcessInfo`
+- `src/connectors/*.ts` (5 files) — implement all 4 new methods
+- `src/config.ts` — `allowWriteOps?: boolean` field
+- `src/server.ts` — register 4 new tools
+- `src/index.ts` — CLI + REPL commands + aliases (`kp`, `rs`, `vars`, `srv`)
+- `src/tools/health-check.ts` — 5th replication check
+- Documentation (8 files)
+
+### Final Test Results (Sprint 9)
+- **94 unit tests** across **19 test files**, all passing
+- **~30 integration tests** (requires Docker + `allowWriteOps: true`)
+- **~330 total tests** (cumulative)
+- 14 MCP tools registered
+- 14 CLI commands, 14 REPL commands
+
+### Bugs Fixed During Implementation
+- **PostgreSQL replication lag:** `replay_lag` is interval type — use direct `EXTRACT(EPOCH FROM replay_lag)` cast
+- **Oracle replication false-positive:** Added `v$dataguard_config` count check before querying `v$database.role`
+- **MongoDB killProcess:** Cannot filter `currentOp` by opid — fetch all ops client-side
+- **MySQL duplicate return:** Syntax error from patch conflict — removed orphaned line
+- **Integration test imports:** ESM dynamic import patterns verified against existing `.mjs` files

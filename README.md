@@ -14,7 +14,10 @@ Universal database copilot — diagnostics, operations, and performance analysis
 - **Table sizes** — list table/collection sizes with human-readable formatting (`table-sizes`)
 - **Explain plans** — execution plan analysis with optional `--analyze` flag (PostgreSQL executes the query)
 - **Slow queries** — surface slow query data from engine internals (performance_schema, pg_stat_statements, sys.dm_exec_query_stats, V$SQLAREA, currentOp)
-- **Health checks** — orchestrate connectivity, blocking, processes, and slow queries into one status call
+- **Health checks** — orchestrate connectivity, blocking, processes, slow queries, and replication into one status call
+- **Kill process** — guided remediation: dry-run proposal, explicit confirm, audit log at `~/.ai-dba/audit.log`
+- **Replication status** — normalized role, lag, and status across all engines
+- **Server diagnostics** — curated server variables and runtime status metrics
 - **SQL guard** — shared validation module rejects destructive SQL before it reaches connectors
 - **GitHub Actions CI** — build + test on Node 20/22, runs on every push/PR to main
 - **Documentation site** — MkDocs Material with 8 pages, light/dark mode, search
@@ -83,7 +86,11 @@ npm run connect -- 'postgresql://postgres:***@127.0.0.1:5432/mydb'
 | `table-sizes <engineId> [database]` | List table sizes with human-readable formatting |
 | `explain <engineId> <query> [-a]` | Show execution plan (add `-a` for ANALYZE) |
 | `slow-queries <engineId> [--limit N] [--min-duration-ms N]` | List slow queries from engine internals |
-| `health-check <engineId>` | Run health check (connectivity, blocking, processes, slow queries) |
+| `health-check <engineId>` | Run health check (connectivity, blocking, processes, slow queries, replication) |
+| `kill-process <engineId> <pid> [--confirm]` | Kill a session (dry-run default, `--confirm` to execute) |
+| `replication-status <engineId>` | Show replication status (role, lag, status) |
+| `server-variables <engineId>` | List curated server configuration variables |
+| `server-status <engineId>` | List curated server runtime status metrics |
 | `connect <url>` | Connect to a database via URL |
 | `repl` | Interactive REPL for database diagnostics |
 
@@ -235,7 +242,7 @@ Starts an MCP server over stdio. Used by AI agents to call database diagnostics 
 }
 ```
 
-The server exposes six tools:
+The server exposes fourteen tools:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
@@ -248,9 +255,13 @@ The server exposes six tools:
 | `table-sizes` | `engineId` (string, required), `database` (string, optional) | List table sizes with data/index/total breakdown |
 | `explain` | `engineId` (string, required), `query` (string, required), `analyze` (boolean, optional) | Show execution plan for a query |
 | `slow-queries` | `engineId` (string, required), `limit` (int, optional), `minDurationMs` (int, optional) | List slow queries from engine internals |
-| `health-check` | `engineId` (string, required) | Run health check (connectivity, blocking, processes, slow queries) |
+| `health-check` | `engineId` (string, required) | Run health check (connectivity, blocking, processes, slow queries, replication) |
+| `kill-process` | `engineId` (string, required), `pid` (string, required), `confirm` (boolean, optional) | Kill a session (dry-run default, `confirm=true` to execute, requires `allowWriteOps`) |
+| `replication-status` | `engineId` (string, required) | Get replication status (role, lagSeconds, status, errorMessage) |
+| `server-variables` | `engineId` (string, required) | List curated server configuration variables |
+| `server-status` | `engineId` (string, required) | List curated server runtime status metrics |
 
-All tools return JSON. The `database` parameter overrides the engine's configured database (MySQL) or schema (PostgreSQL).
+All tools return JSON.
 
 ## Docker Test Environment
 
@@ -391,8 +402,9 @@ src/
   index.ts              CLI entry point (commander, REPL)
   server.ts             MCP server setup + connector map
   config.ts             YAML config loader with URL parsing
-  connector.ts          DatabaseConnector interface + shared types (BlockingChain, TableSizeInfo, ExplainResult, SlowQueryInfo, HealthCheckResult)
+  connector.ts          DatabaseConnector interface + shared types (14 methods, BlockingChain, TableSizeInfo, ExplainResult, SlowQueryInfo, KillResult, ReplicationStatus, HealthCheckResult)
   sql-guard.ts          Shared SQL validation (validateReadOnlySql, validateExplainQuery, isJsonCommand)
+  audit.ts              JSONL audit log writer (~/.ai-dba/audit.log)
   connectors/
     mysql.ts            MySQLConnector (implements DatabaseConnector)
     postgres.ts         PostgreSQLConnector (implements DatabaseConnector)
@@ -409,10 +421,14 @@ src/
     table-sizes.ts      MCP tool — table size breakdown
     explain.ts          MCP tool — execution plans
     slow-queries.ts     MCP tool — slow query analysis
-    health-check.ts     MCP tool — orchestrated health check
+    health-check.ts     MCP tool — orchestrated health check (5 checks)
+    kill-process.ts     MCP tool — kill session (dry-run + confirm + audit)
+    replication-status.ts MCP tool — normalized replication status
+    server-variables.ts MCP tool — curated server config variables
+    server-status.ts    MCP tool — curated server runtime metrics
 ```
 
-- **DatabaseConnector interface** — 10 methods: `listDatabases`, `listTables`, `describeTable`, `listIndexes`, `listProcesses`, `query`, `getBlockingChains`, `listTableSizes`, `explainQuery`, `listSlowQueries`. All 5 engines implement the interface.
+- **DatabaseConnector interface** — 14 methods: `listDatabases`, `listTables`, `describeTable`, `listIndexes`, `listProcesses`, `query`, `getBlockingChains`, `listTableSizes`, `explainQuery`, `listSlowQueries`, `killProcess`, `listReplicationStatus`, `listServerVariables`, `listServerStatus`. All 5 engines implement the interface.
 - **sql-guard.ts** — shared validation module used by CLI, REPL, and MCP tool paths. Rejects destructive SQL (INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, MERGE, GRANT, REVOKE) using `\b` word-boundary regex.
 - **Lazy imports** — MCP SDK, mysql2, and pg are loaded dynamically only when needed. CLI commands like `list-engines` start instantly without loading database drivers.
 - **Lazy connection pools** — Database connections are created on first use, not at startup.

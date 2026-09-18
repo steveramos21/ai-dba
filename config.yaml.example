@@ -31,7 +31,14 @@ engines:
 
   mongodb-test:
     type: mongodb
-    url: mongodb://testuser:testpassword@127.0.0.1:12017/testdb?authSource=admin
+    url: mongodb://testuser:***@127.0.0.1:12017/testdb?authSource=admin
+
+  # Sprint 9: Write operations (kill-process) require allowWriteOps: true
+  # Default is false — kill-process returns an error without this flag
+  # mysql-staging:
+  #   type: mysql
+  #   url: mysql://root:***@staging:3306/app
+  #   allowWriteOps: true    # kill-process enabled
 
   # PostgreSQL with SSL
   # postgres-prod:

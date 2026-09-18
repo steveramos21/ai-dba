@@ -14,7 +14,7 @@ This guide covers manual testing procedures for all sprints. Each section reflec
 | 6 | MongoDB connector | MERGED | [Sprint 6 - MongoDB](#sprint-6-mongodb) |
 | 8 | Query performance & health | COMPLETE | [Sprint 8 - Performance](#sprint-8-query-performance-health) |
 
-**Test totals:** 75 unit tests + 121 integration tests + 84 Sprint 8 integration tests = 280 tests, all passing.
+**Test totals:** 94 unit tests + 121 integration tests + 84 Sprint 8 integration tests + ~30 Sprint 9 integration tests = ~330 tests, all passing.
 
 ## Prerequisites (all sprints)
 
@@ -39,7 +39,7 @@ docker info | head -3
 npm test
 ```
 
-**Expected:** 15 test files, 75 tests, all passing. Duration ~20s.
+**Expected:** 19 test files, 94 tests, all passing. Duration ~20s.
 
 ### 2. Integration Tests (Docker required)
 
@@ -110,7 +110,7 @@ quit              — "Bye."
 ```bash
 echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | timeout 5 node dist/index.js --config config.yaml serve 2>/dev/null
 ```
-**Expected:** JSON response listing 10 tools: blocking-chains, databases, tables, describe-table, indexes, processes, table-sizes, explain, slow-queries, health-check.
+**Expected:** JSON response listing 14 tools: blocking-chains, databases, tables, describe-table, indexes, processes, table-sizes, explain, slow-queries, health-check, kill-process, replication-status, server-variables, server-status.
 
 ---
 
@@ -175,7 +175,7 @@ docker exec ai-dba-sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U 
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 15 test files, 75 tests (includes 4 SQL Server URL parser tests)
+# Expected: 19 test files, 94 tests (includes 4 SQL Server URL parser tests)
 ```
 
 **Step 4: Run integration tests**
@@ -327,7 +327,7 @@ docker exec ai-dba-oracle-test bash -c "echo 'CREATE TABLE blocking_test (id NUM
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 15 test files, 75 tests (includes 4 Oracle URL parser tests)
+# Expected: 19 test files, 94 tests (includes 4 Oracle URL parser tests)
 ```
 
 **Step 4: Run integration tests**
@@ -480,7 +480,7 @@ docker exec ai-dba-mongodb-test mongosh "mongodb://testuser:testpassword@127.0.0
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 15 test files, 75 tests (includes 4 MongoDB URL parser tests)
+# Expected: 19 test files, 94 tests (includes 4 MongoDB URL parser tests)
 ```
 
 **Step 4: Run integration tests**
@@ -569,7 +569,7 @@ Run this checklist after all sprints are merged:
 ### Pre-flight
 - [ ] `npm install` — no errors
 - [ ] `npm run build` — TypeScript compiles, 0 errors
-- [ ] `npm test` — 75 unit tests pass
+- [ ] `npm test` — 94 unit tests pass
 - [ ] `docker compose up -d` — all 5 containers healthy (MySQL 13306, PostgreSQL 15432, SQL Server 11433, Oracle 11521, MongoDB 12017)
 
 ### Per-engine verification
@@ -617,7 +617,7 @@ For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb
 - [ ] `npm run test:integration:sprint8` — 84 tests pass (Sprint 8)
 
 ### MCP server
-- [ ] `tools/list` returns 10 tools
+- [ ] `tools/list` returns 14 tools
 - [ ] Each tool accepts engineId and returns valid JSON
 - [ ] Unknown engineId returns error
 - [ ] Unsupported engine type returns error
@@ -634,13 +634,13 @@ For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb
 
 - All 5 Docker containers running and healthy
 - `npm run build` succeeds with 0 errors
-- `npm test` passes (75 unit tests)
+- `npm test` passes (94 unit tests)
 
 ### Step 1: Run unit tests
 
 ```bash
 npm test
-# Expected: 15 test files, 75 tests, all passing
+# Expected: 19 test files, 94 tests, all passing
 ```
 
 ### Step 2: Run Sprint 8 integration tests
@@ -677,7 +677,7 @@ node dist/index.js --config config.yaml slow-queries mysql-test
 
 # Health check
 node dist/index.js --config config.yaml health-check mysql-test
-# Expected: Status table with 4 checks (connectivity, blocking, processes, slow-queries)
+# Expected: Status table with 5 checks (connectivity, blocking, processes, slow-queries, replication)
 ```
 
 ### Step 4: REPL tests
@@ -692,7 +692,7 @@ explain SELECT 1    — execution plan
 exp SELECT 1        — alias works
 slow-queries        — slow query list
 sq                  — alias works
-health-check        — health status (4 checks)
+health-check        — health status (5 checks)
 hc                  — alias works
 
 use postgres-test
@@ -706,13 +706,13 @@ explain {"find":"blocking_test","filter":{}}  — MongoDB explain
 
 ```bash
 echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | timeout 5 node dist/index.js --config config.yaml serve 2>/dev/null
-# Expected: 10 tools listed including table-sizes, explain, slow-queries, health-check
+# Expected: 14 tools listed including table-sizes, explain, slow-queries, health-check, kill-process, replication-status, server-variables, server-status
 
 echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"table-sizes","arguments":{"engineId":"mysql-test"}},"id":2}' | timeout 5 node dist/index.js --config config.yaml serve 2>/dev/null
 # Expected: JSON with table sizes
 
 echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"health-check","arguments":{"engineId":"mysql-test"}},"id":3}' | timeout 5 node dist/index.js --config config.yaml serve 2>/dev/null
-# Expected: JSON with status: "healthy" or "warning" and 4 checks
+# Expected: JSON with status: "healthy" or "warning" and 5 checks
 ```
 
 ### Known Issues

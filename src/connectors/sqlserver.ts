@@ -14,7 +14,12 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  KillResult,
+  ReplicationStatus,
+  ServerVariable,
+  ServerStatusMetric,
 } from "../connector.js";
+import { writeAuditEntry } from "../audit.js";
 
 /**
  * Parse a sqlserver:// connection URL into tedious config options.
@@ -429,6 +434,199 @@ export class SqlServerConnector implements DatabaseConnector {
       conn.close();
     }
     this.connections.clear();
+  }
+
+  // ─── Sprint 9: Write operations + server diagnostics ───
+
+  async killProcess(engineId: string, config: EngineConfig, pid: string, options?: { dryRun?: boolean }): Promise<KillResult> {
+    const dryRun = options?.dryRun ?? false;
+    const pidNum = parseInt(pid, 10);
+
+    if (isNaN(pidNum) || pidNum <= 0) {
+      return { success: false, found: false, pid, engineId, error: `Invalid PID: "${pid}" — expected a positive integer` };
+    }
+
+    if (!config.allowWriteOps) {
+      return { success: false, found: false, pid, engineId, error: `Write operations disabled for engine "${engineId}". Set allowWriteOps: true in config.yaml.` };
+    }
+
+    const conn = await this.getConnection(engineId, config);
+    try {
+      // Look up the process
+      const { rows } = await conn.execSql(
+        `SELECT r.session_id as pid, s.login_name as user_name, s.host_name as host,
+                DB_NAME(s.database_id) as database_name, r.status as status,
+                r.total_elapsed_time as time, st.text as query
+         FROM sys.dm_exec_requests r
+         JOIN sys.dm_exec_sessions s ON r.session_id = s.session_id
+         OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) st
+         WHERE r.session_id = ${pidNum}`
+      );
+
+      const proc = rows[0] as any;
+      const command = `KILL ${pidNum}`;
+      const queryTrunc = proc?.query ? (proc.query as string).substring(0, 500) : undefined;
+      const durationStr = proc ? `${proc.time ?? 0}ms` : undefined;
+
+      // Process not found
+      if (!proc) {
+        if (dryRun) {
+          return { success: false, found: false, wouldKill: true, pid, engineId, command, notes: "Process not found — may have terminated independently" };
+        }
+        // Try to kill anyway — check error to distinguish "already gone" from real errors
+        try {
+          await conn.execSql(`KILL ${pidNum}`);
+        } catch (e: any) {
+          const msg = e.message ?? String(e);
+          if (msg.includes("not a valid process") || msg.includes("SPID") || msg.includes("not found")) {
+            return { success: true, found: false, pid, engineId, command, killedAt: new Date().toISOString(), notes: "Process not found — may have terminated independently" };
+          }
+          return { success: false, found: false, pid, engineId, command, error: msg };
+        }
+        return { success: true, found: false, pid, engineId, command, killedAt: new Date().toISOString(), notes: "Process not found — may have terminated independently" };
+      }
+
+      // Dry-run: return proposal
+      if (dryRun) {
+        return {
+          success: false, found: true, wouldKill: true, pid, engineId,
+          user: proc.user_name, database: proc.database_name ?? undefined,
+          duration: durationStr, query: queryTrunc, command,
+        };
+      }
+
+      // Execute the kill
+      try {
+        await conn.execSql(`KILL ${pidNum}`);
+        const killedAt = new Date().toISOString();
+
+        writeAuditEntry({
+          timestamp: killedAt, action: "kill-process", engineId, pid,
+          user: proc.user_name, database: proc.database_name ?? undefined,
+          duration: durationStr, query: queryTrunc, command,
+          success: true, killedAt,
+        });
+
+        return { success: true, found: true, pid, engineId, user: proc.user_name, database: proc.database_name ?? undefined, duration: durationStr, query: queryTrunc, command, killedAt };
+      } catch (e: any) {
+        const error = e.message ?? String(e);
+        writeAuditEntry({
+          timestamp: new Date().toISOString(), action: "kill-process", engineId, pid,
+          user: proc.user_name, database: proc.database_name ?? undefined,
+          duration: durationStr, query: queryTrunc, command,
+          success: false, error,
+        });
+        return { success: false, found: true, pid, engineId, user: proc.user_name, database: proc.database_name ?? undefined, duration: durationStr, query: queryTrunc, command, error };
+      }
+    } finally {
+      // Don't close — connection is reused
+    }
+  }
+
+  async listReplicationStatus(engineId: string, config: EngineConfig): Promise<ReplicationStatus> {
+    const conn = await this.getConnection(engineId, config);
+    try {
+      // Check AlwaysOn Availability Groups
+      const { rows } = await conn.execSql(
+        `SELECT
+           ars.role_desc AS role,
+           ars.synchronization_health_desc AS health,
+           DATEDIFF(SECOND, ars.last_connect_time, GETUTCDATE()) AS lag_seconds
+         FROM sys.dm_hadr_availability_replica_states ars
+         JOIN sys.availability_replicas ar ON ars.replica_id = ar.replica_id`
+      );
+
+      if (rows.length > 0) {
+        const r = rows[0] as any;
+        const role = (r.role as string)?.toLowerCase() ?? "none";
+        const health = r.health as string;
+        const lag = r.lag_seconds != null ? Number(r.lag_seconds) : null;
+
+        if (health === "NOT_HEALTHY") {
+          return { role, lagSeconds: lag, status: "down", errorMessage: "Availability group not healthy" };
+        }
+        if (lag != null && lag > 60) {
+          return { role, lagSeconds: lag, status: "degraded", errorMessage: null };
+        }
+        return { role, lagSeconds: lag, status: "healthy", errorMessage: null };
+      }
+
+      return { role: "none", lagSeconds: null, status: "not_configured", errorMessage: null };
+    } catch {
+      // AG views not available or no permission
+      return { role: "none", lagSeconds: null, status: "not_configured", errorMessage: null };
+    }
+  }
+
+  async listServerVariables(engineId: string, config: EngineConfig): Promise<ServerVariable[]> {
+    const conn = await this.getConnection(engineId, config);
+    const { rows } = await conn.execSql(
+      `SELECT name, value_in_use AS value, description
+       FROM sys.configurations
+       WHERE name IN (
+         'max degree of parallelism', 'cost threshold for parallelism',
+         'max server memory (MB)', 'min server memory (MB)',
+         'max worker threads', 'network packet size (B)',
+         'user connections', 'locks', 'open objects',
+         'remote access', 'remote login timeout (s)', 'remote query timeout (s)',
+         'default language', 'fill factor (%)',
+         'index create memory (KB)', 'min memory per query (KB)',
+         'query wait (s)', 'query governor cost limit',
+         'max text repl size (B)', 'media retention (days)',
+         'recovery interval (min)', 'nested triggers',
+         'affinity mask', 'lightweight pooling', 'priority boost',
+         'transform noise words', 'two digit year cutoff',
+         'xp_cmdshell', 'clr enabled', 'cross db ownership chaining',
+         'remote proc trans', 'Ole Automation Procedures',
+         'Ad Hoc Distributed Queries', 'show advanced options'
+       )
+       ORDER BY name`
+    );
+    return rows.map((row: any) => ({
+      name: row.name,
+      value: String(row.value ?? ""),
+      description: row.description ?? undefined,
+    }));
+  }
+
+  async listServerStatus(engineId: string, config: EngineConfig): Promise<ServerStatusMetric[]> {
+    const conn = await this.getConnection(engineId, config);
+    const { rows } = await conn.execSql(
+      `SELECT
+         @@CONNECTIONS AS total_connections,
+         @@MAX_CONNECTIONS AS max_connections,
+         @@TOTAL_READ AS total_read,
+         @@TOTAL_WRITE AS total_write,
+         @@TOTAL_ERRORS AS total_errors,
+         @@PACK_RECEIVED AS pack_received,
+         @@PACK_SENT AS pack_sent,
+         @@CPU_BUSY AS cpu_busy,
+         @@IO_BUSY AS io_busy,
+         @@IDLE AS idle_time,
+         @@TIMETICKS AS time_ticks,
+         (SELECT COUNT(*) FROM sys.dm_exec_connections) AS active_connections,
+         (SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process = 1) AS user_sessions,
+         (SELECT COUNT(*) FROM sys.dm_exec_requests WHERE session_id >= 50) AS active_requests,
+         (SELECT COUNT(*) FROM sys.dm_tran_locks WHERE request_status = 'GRANT') AS granted_locks,
+         (SELECT COUNT(*) FROM sys.dm_tran_locks WHERE request_status = 'WAIT') AS waiting_locks`
+    );
+    if (rows.length === 0) return [];
+    const r = rows[0] as any;
+    return [
+      { name: "total_connections", value: Number(r.total_connections ?? 0) },
+      { name: "max_connections", value: Number(r.max_connections ?? 0) },
+      { name: "active_connections", value: Number(r.active_connections ?? 0) },
+      { name: "user_sessions", value: Number(r.user_sessions ?? 0) },
+      { name: "active_requests", value: Number(r.active_requests ?? 0) },
+      { name: "granted_locks", value: Number(r.granted_locks ?? 0) },
+      { name: "waiting_locks", value: Number(r.waiting_locks ?? 0) },
+      { name: "total_read", value: Number(r.total_read ?? 0) },
+      { name: "total_write", value: Number(r.total_write ?? 0) },
+      { name: "total_errors", value: Number(r.total_errors ?? 0) },
+      { name: "cpu_busy", value: Number(r.cpu_busy ?? 0) },
+      { name: "io_busy", value: Number(r.io_busy ?? 0) },
+      { name: "idle_time", value: Number(r.idle_time ?? 0) },
+    ];
   }
 }
 

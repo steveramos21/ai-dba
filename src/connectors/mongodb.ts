@@ -14,7 +14,12 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  KillResult,
+  ReplicationStatus,
+  ServerVariable,
+  ServerStatusMetric,
 } from "../connector.js";
+import { writeAuditEntry } from "../audit.js";
 
 /**
  * Parse a mongodb:// connection URL.
@@ -323,6 +328,244 @@ export class MongoDbConnector implements DatabaseConnector {
       await client.close();
     }
     this.clients.clear();
+  }
+
+  // ─── Sprint 9: Write operations + server diagnostics ───
+
+  async killProcess(engineId: string, config: EngineConfig, pid: string, options?: { dryRun?: boolean }): Promise<KillResult> {
+    const dryRun = options?.dryRun ?? false;
+    const pidNum = parseInt(pid, 10);
+
+    if (isNaN(pidNum) || pidNum <= 0) {
+      return { success: false, found: false, pid, engineId, error: `Invalid PID: "${pid}" — expected a positive integer` };
+    }
+
+    if (!config.allowWriteOps) {
+      return { success: false, found: false, pid, engineId, error: `Write operations disabled for engine "${engineId}". Set allowWriteOps: true in config.yaml.` };
+    }
+
+    const { client } = await this.getClient(engineId, config);
+    const admin = client.db().admin();
+    const command = `db.killOp(${pidNum})`;
+
+    try {
+      // Look up the operation — currentOp doesn't support opid as a filter parameter,
+      // so we fetch all ops and filter client-side
+      const result = await admin.command({ currentOp: 1, $ownOps: false });
+      const ops = (result.inprog || []).filter((op: any) => op.opid === pidNum);
+      const proc = ops[0] as any;
+
+      const queryTrunc = proc?.command ? JSON.stringify(proc.command).substring(0, 500) : undefined;
+      const durationStr = proc ? `${Math.round((proc.secs_running || 0) * 1000)}ms` : undefined;
+
+      // Process not found
+      if (!proc) {
+        if (dryRun) {
+          return { success: false, found: false, wouldKill: true, pid, engineId, command, notes: "Process not found — may have terminated independently" };
+        }
+        // Try to kill anyway
+        try {
+          await admin.command({ killOp: 1, op: pidNum });
+        } catch { /* ignore — op already gone */ }
+        return { success: true, found: false, pid, engineId, command, killedAt: new Date().toISOString(), notes: "Process not found — may have terminated independently" };
+      }
+
+      // Dry-run: return proposal
+      if (dryRun) {
+        return {
+          success: false, found: true, wouldKill: true, pid, engineId,
+          user: proc.client ?? undefined, database: proc.ns ?? undefined,
+          duration: durationStr, query: queryTrunc, command,
+        };
+      }
+
+      // Execute the kill
+      try {
+        await admin.command({ killOp: 1, op: pidNum });
+        const killedAt = new Date().toISOString();
+
+        writeAuditEntry({
+          timestamp: killedAt, action: "kill-process", engineId, pid,
+          user: proc.client, database: proc.ns ?? undefined,
+          duration: durationStr, query: queryTrunc, command,
+          success: true, killedAt,
+        });
+
+        return { success: true, found: true, pid, engineId, user: proc.client, database: proc.ns ?? undefined, duration: durationStr, query: queryTrunc, command, killedAt };
+      } catch (e: any) {
+        const error = e.message ?? String(e);
+        writeAuditEntry({
+          timestamp: new Date().toISOString(), action: "kill-process", engineId, pid,
+          user: proc.client, database: proc.ns ?? undefined,
+          duration: durationStr, query: queryTrunc, command,
+          success: false, error,
+        });
+        return { success: false, found: true, pid, engineId, user: proc.client, database: proc.ns ?? undefined, duration: durationStr, query: queryTrunc, command, error };
+      }
+    } catch (e: any) {
+      // currentOp may require privileges
+      if (dryRun) {
+        return { success: false, found: false, wouldKill: true, pid, engineId, command, notes: "Cannot query currentOp — may lack privileges" };
+      }
+      // Try to kill anyway — but be honest about the blind execution
+      try {
+        await admin.command({ killOp: 1, op: pidNum });
+        return { success: true, found: false, pid, engineId, command, killedAt: new Date().toISOString(), notes: "Could not verify process before kill — killOp sent without currentOp verification" };
+      } catch (e2: any) {
+        return { success: false, found: false, pid, engineId, command, error: `Cannot query currentOp: ${e.message}. killOp also failed: ${e2.message ?? String(e2)}` };
+      }
+    }
+  }
+
+  async listReplicationStatus(engineId: string, config: EngineConfig): Promise<ReplicationStatus> {
+    const { client } = await this.getClient(engineId, config);
+    const admin = client.db().admin();
+    try {
+      const result = await admin.command({ replSetGetStatus: 1 }) as any;
+
+      // Identify this node's role
+      const myState = result.myState;
+      // MongoDB states: 1=PRIMARY, 2=SECONDARY, 3=RECOVERING, etc.
+      let role = "none";
+      if (myState === 1) role = "primary";
+      else if (myState === 2) role = "secondary";
+      else if (myState === 3) role = "recovering";
+      else role = `state_${myState}`;
+
+      // Calculate lag from members
+      let maxLag = 0;
+      let hasError = false;
+      const members = result.members || [];
+      for (const m of members) {
+        if (m.health === 0) hasError = true;
+        if (m.optimeDate && result.date) {
+          const lag = Math.floor((result.date.getTime() - m.optimeDate.getTime()) / 1000);
+          if (lag > maxLag) maxLag = lag;
+        }
+      }
+
+      if (hasError) {
+        return { role, lagSeconds: maxLag, status: "down", errorMessage: "One or more replica set members are down" };
+      }
+      if (maxLag > 60) {
+        return { role, lagSeconds: maxLag, status: "degraded", errorMessage: null };
+      }
+
+      return { role, lagSeconds: maxLag, status: "healthy", errorMessage: null };
+    } catch (e: any) {
+      // Not a replica set or no permission
+      const msg = e.message ?? String(e);
+      if (msg.includes("not running with --replSet") || msg.includes("no replset config") ||
+          msg.includes("NotYetInitialized") || msg.includes("no such command") ||
+          msg.includes("unauthorized") || msg.code === 76 || msg.code === 13) {
+        return { role: "none", lagSeconds: null, status: "not_configured", errorMessage: null };
+      }
+      return { role: "none", lagSeconds: null, status: "not_configured", errorMessage: msg };
+    }
+  }
+
+  async listServerVariables(engineId: string, config: EngineConfig): Promise<ServerVariable[]> {
+    const { client } = await this.getClient(engineId, config);
+    const admin = client.db().admin();
+    try {
+      const result = await admin.command({ serverStatus: 1 }) as any;
+      const vars: ServerVariable[] = [];
+
+      // Version info
+      if (result.version) vars.push({ name: "version", value: result.version });
+      if (result.process) vars.push({ name: "process", value: result.process });
+      if (result.host) vars.push({ name: "host", value: result.host });
+      if (result.uptime != null) vars.push({ name: "uptime_seconds", value: String(result.uptime) });
+
+      // Connections
+      const conn = result.connections || {};
+      vars.push({ name: "current_connections", value: String(conn.current ?? 0) });
+      vars.push({ name: "available_connections", value: String(conn.available ?? 0) });
+      vars.push({ name: "total_created", value: String(conn.totalCreated ?? 0) });
+
+      // Storage engine
+      if (result.storageEngine) {
+        vars.push({ name: "storage_engine", value: result.storageEngine.name ?? "unknown" });
+      }
+
+      // Oplog
+      if (result.oplog) {
+        vars.push({ name: "oplog_size_mb", value: String(Math.round((result.oplog.windowSize || 0))) });
+      }
+
+      // Network
+      const net = result.network || {};
+      vars.push({ name: "bytes_in", value: String(net.bytesIn ?? 0) });
+      vars.push({ name: "bytes_out", value: String(net.bytesOut ?? 0) });
+
+      // Memory
+      const mem = result.mem || {};
+      vars.push({ name: "resident_mb", value: String(mem.resident ?? 0) });
+      vars.push({ name: "virtual_mb", value: String(mem.virtual ?? 0) });
+      vars.push({ name: "mapped_mb", value: String(mem.mapped ?? 0) });
+
+      return vars.sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return [];
+    }
+  }
+
+  async listServerStatus(engineId: string, config: EngineConfig): Promise<ServerStatusMetric[]> {
+    const { client } = await this.getClient(engineId, config);
+    const admin = client.db().admin();
+    try {
+      const result = await admin.command({ serverStatus: 1 }) as any;
+      const metrics: ServerStatusMetric[] = [];
+
+      // Connections
+      const conn = result.connections || {};
+      metrics.push({ name: "current_connections", value: Number(conn.current ?? 0) });
+      metrics.push({ name: "available_connections", value: Number(conn.available ?? 0) });
+
+      // Operations
+      const opcounters = result.opcounters || {};
+      metrics.push({ name: "inserts", value: Number(opcounters.insert ?? 0) });
+      metrics.push({ name: "queries", value: Number(opcounters.query ?? 0) });
+      metrics.push({ name: "updates", value: Number(opcounters.update ?? 0) });
+      metrics.push({ name: "deletes", value: Number(opcounters.delete ?? 0) });
+      metrics.push({ name: "getmores", value: Number(opcounters.getmore ?? 0) });
+      metrics.push({ name: "commands", value: Number(opcounters.command ?? 0) });
+
+      // Network
+      const net = result.network || {};
+      metrics.push({ name: "bytes_in", value: Number(net.bytesIn ?? 0) });
+      metrics.push({ name: "bytes_out", value: Number(net.bytesOut ?? 0) });
+      metrics.push({ name: "num_requests", value: Number(net.numRequests ?? 0) });
+
+      // Memory
+      const mem = result.mem || {};
+      metrics.push({ name: "resident_mb", value: Number(mem.resident ?? 0) });
+      metrics.push({ name: "virtual_mb", value: Number(mem.virtual ?? 0) });
+
+      // Document metrics
+      const docMetrics = result.metrics?.document || {};
+      metrics.push({ name: "documents_returned", value: Number(docMetrics.returned ?? 0) });
+      metrics.push({ name: "documents_inserted", value: Number(docMetrics.inserted ?? 0) });
+      metrics.push({ name: "documents_updated", value: Number(docMetrics.updated ?? 0) });
+      metrics.push({ name: "documents_deleted", value: Number(docMetrics.deleted ?? 0) });
+
+      // Index metrics
+      const idxMetrics = result.indexCounter || result.metrics?.indexes || {};
+      metrics.push({ name: "index_accesses", value: Number(idxMetrics.accesses ?? 0) });
+      metrics.push({ name: "index_hits", value: Number(idxMetrics.hits ?? 0) });
+      metrics.push({ name: "index_misses", value: Number(idxMetrics.misses ?? 0) });
+
+      // Query execution time
+      if (result.opLatencies) {
+        metrics.push({ name: "read_latency_us", value: Number(result.opLatencies.reads?.latency ?? 0) });
+        metrics.push({ name: "write_latency_us", value: Number(result.opLatencies.writes?.latency ?? 0) });
+        metrics.push({ name: "command_latency_us", value: Number(result.opLatencies.commands?.latency ?? 0) });
+      }
+
+      return metrics.sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return [];
+    }
   }
 }
 

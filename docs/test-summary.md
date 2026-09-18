@@ -4,10 +4,11 @@
 
 | Type | Count | Command |
 |------|-------|---------|
-| Unit tests | 75 | `npm test` |
+| Unit tests | 94 | `npm test` |
 | Integration tests (Sprints 1-7) | 121 | `npm run test:integration` |
 | Integration tests (Sprint 8) | 84 | `npm run test:integration:sprint8` |
-| **Total** | **280** | |
+| Integration tests (Sprint 9) | ~30 | `npm run test:integration:sprint9` |
+| **Total** | **~330** | |
 
 ## Unit Tests
 
@@ -15,7 +16,7 @@
 npm test
 ```
 
-No Docker required. Tests URL parsers, MCP tool dispatch logic, and SQL guard validation. 75 tests across 15 files covering:
+No Docker required. Tests URL parsers, MCP tool dispatch logic, and SQL guard validation. 94 tests across 19 files covering:
 
 - URL parsers (`parseMysqlUrl`, `parsePostgresUrl`, `parseSqlServerUrl`, `parseOracleUrl`, `parseMongoUrl`)
 - MCP tool dispatch (happy path, unknown engine, unsupported type, connector error propagation)
@@ -30,9 +31,10 @@ docker compose up -d
 # Wait for all healthy
 npm run test:integration       # 121 tests (Sprints 1-7)
 npm run test:integration:sprint8  # 84 tests (Sprint 8)
+npm run test:integration:sprint9  # ~30 tests (Sprint 9)
 ```
 
-Tests all 10 connector methods against live MySQL 8.0, PostgreSQL 16, SQL Server 2022, Oracle XE 21, and MongoDB 7.
+Tests all 14 connector methods against live MySQL 8.0, PostgreSQL 16, SQL Server 2022, Oracle XE 21, and MongoDB 7.
 
 ### Bugs Caught by Integration Testing
 
@@ -62,6 +64,6 @@ See [Testing Guide](testing-guide.md) for comprehensive per-engine manual test p
 GitHub Actions runs on every push/PR to main:
 
 - Node 20.x and 22.x matrix
-- `npm ci` → `npm run build` → `npm test` (75 unit tests)
+- `npm ci` → `npm run build` → `npm test` (94 unit tests)
 - CLI entry point verification
 - Integration tests excluded (require 5 Docker containers)

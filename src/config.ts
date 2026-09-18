@@ -21,6 +21,8 @@ export interface EngineConfig {
   ssl?: Record<string, unknown>;
   /** Connection limit (default: 5) */
   connectionLimit?: number;
+  /** Allow write operations (kill-process). Default: false. */
+  allowWriteOps?: boolean;
 }
 
 export interface AiDbaConfig {

@@ -104,7 +104,7 @@ Run a health check on an engine:
 ```bash
 node dist/index.js --config config.yaml health-check my-mysql
 ```
-Runs 4 checks and reports an aggregated status:
+Runs 5 checks and reports an aggregated status:
 
 | Check | Critical (fail) | Warning (warn) |
 |-------|-----------------|-----------------|
@@ -112,6 +112,34 @@ Runs 4 checks and reports an aggregated status:
 | Blocking chains | Any chain detected | — |
 | Active processes | — | >50 processes |
 | Slow queries | — | Any found |
+| Replication | Replication down | Lag detected |
+
+### `kill-process`
+Kill a database session (dry-run by default, use `--confirm` to execute):
+```bash
+node dist/index.js --config config.yaml kill-process my-mysql 42
+node dist/index.js --config config.yaml kill-process my-mysql 42 --confirm
+node dist/index.js --config config.yaml kill-process my-oracle 42,123 --confirm
+```
+Requires `allowWriteOps: true` in config. All kills are logged to `~/.ai-dba/audit.log`.
+
+### `replication-status`
+Show replication status for an engine:
+```bash
+node dist/index.js --config config.yaml replication-status my-mysql
+```
+
+### `server-variables`
+List curated server configuration variables:
+```bash
+node dist/index.js --config config.yaml server-variables my-mysql
+```
+
+### `server-status`
+List curated server runtime status metrics:
+```bash
+node dist/index.js --config config.yaml server-status my-mysql
+```
 
 ### `--version`
 ```bash
@@ -134,7 +162,11 @@ node dist/index.js --version
 | `table-sizes` | `ts` | Show table sizes (optional: `table-sizes <database>`) |
 | `explain <query>` | `exp` | Show execution plan (optional: `explain <query> -a`) |
 | `slow-queries` | `sq` | List slow queries (optional: `--limit N --min-ms N`) |
-| `health-check` | `hc` | Run health check on current engine |
+| `health-check` | `hc` | Run health check on current engine (5 checks) |
+| `kill-process <pid>` | `kp` | Kill a session (dry-run default, `--confirm` to execute) |
+| `replication-status` | `rs` | Show replication status |
+| `server-variables` | `vars` | Show server config variables |
+| `server-status` | `srv` | Show server runtime metrics |
 | `sql <query>` | `\s` | Run read-only query |
 | `connect <url>` | `\c` | Connect to new engine via URL |
 | `quit` | `q` | Exit REPL |
