@@ -28,9 +28,20 @@ let passed = 0, failed = 0;
 const results = [];
 
 function assert(name, cond, detail = '') {
-  if (cond) { passed++; results.push(`  PASS  ${name}`); }
-  else { failed++; results.push(`  FAIL  ${name}  ${detail}`); }
+  const line = cond ? `  PASS  ${name}` : `  FAIL  ${name}  ${detail}`;
+  if (cond) passed++; else failed++;
+  results.push(line);
+  console.log(line); // stream live — a hang must be localizable from the log
 }
+
+// Suite watchdog — a hang anywhere must fail loudly instead of swallowing the
+// run. (kill-process blocks are additionally wrapped in withTimeout.)
+const SUITE_WATCHDOG_MS = 480000;
+const suiteWatchdog = setTimeout(() => {
+  console.error(`\nFATAL: sprint9 integration suite exceeded ${SUITE_WATCHDOG_MS / 1000}s — aborting (watchdog)`);
+  process.exit(1);
+}, SUITE_WATCHDOG_MS);
+suiteWatchdog.unref();
 
 // ─── Replication Status ──────────────────────────────────────
 async function testReplicationStatus(engineId, engineConfig, connector) {
@@ -104,7 +115,7 @@ async function testKillProcessReal(engineId, engineConfig, connector) {
 
     if (engineType === 'mysql') {
       const conn = await mysql.createConnection({ host: '127.0.0.1', port: 13306, user: 'root', password: 'testpassword', database: 'testdb' });
-      const victimQuery = conn.query('SELECT SLEEP(30)');
+      const victimQuery = conn.query('SELECT SLEEP(30)').catch(() => {}); // killed below — handler from birth
       await new Promise(r => setTimeout(r, 1000));
       const procs = await connector.listProcesses(engineId, engineConfig);
       const victim = procs.find(p => p.query?.includes('SLEEP'));
@@ -122,12 +133,16 @@ async function testKillProcessReal(engineId, engineConfig, connector) {
         assert(`${label} victim query found in process list`, false, 'SLEEP query not visible in listProcesses');
       }
       try { await victimQuery; } catch {}
-      await conn.end();
+      try { await conn.end(); } catch {}
 
     } else if (engineType === 'postgres') {
       const client = new pg.Client({ connectionString: 'postgresql://postgres@127.0.0.1:15432/testdb' });
+      // Termination of this session is EXPECTED (we kill it below). A terminated
+      // pg client emits 'error', and an unhandled rejection on the victim query
+      // is fatal in Node >=18 — both handlers must exist from birth.
+      client.on('error', () => {});
       await client.connect();
-      const victimQuery = client.query('SELECT pg_sleep(30)');
+      const victimQuery = client.query('SELECT pg_sleep(30)').catch(() => {});
       await new Promise(r => setTimeout(r, 1000));
       const procs = await connector.listProcesses(engineId, engineConfig);
       const victim = procs.find(p => p.query?.includes('pg_sleep') && p.pid !== process.pid);
@@ -142,14 +157,19 @@ async function testKillProcessReal(engineId, engineConfig, connector) {
         assert(`${label} victim query found`, false, 'pg_sleep not visible in process list');
       }
       try { await victimQuery; } catch {}
-      await client.end();
+      try { await client.end(); } catch {}
 
     } else if (engineType === 'sqlserver') {
       const connConfig = { server: '127.0.0.1', authentication: { type: 'default', options: { userName: 'sa', password: 'TestPassword123!' } }, options: { port: 11433, database: 'testdb', trustServerCertificate: true } };
       const conn = new TediousConnection(connConfig);
-      await new Promise((resolve, reject) => { conn.on('connect', err => err ? reject(err) : resolve()); });
+      await new Promise((resolve, reject) => {
+        conn.on('connect', err => err ? reject(err) : resolve());
+        conn.on('error', err => reject(err));
+        conn.connect(); // raw tedious connections don't auto-connect — without this the suite hangs forever
+      });
       const request = new TediousRequest("WAITFOR DELAY '00:00:30'", () => {});
-      conn.execSql(request);
+      // killed below — handler from birth (unhandled rejections are fatal on Node >=18)
+      Promise.resolve(conn.execSql(request)).catch(() => {});
       await new Promise(r => setTimeout(r, 2000));
       const procs = await connector.listProcesses(engineId, engineConfig);
       const victim = procs.find(p => p.command?.includes('WAITFOR') || p.query?.includes('WAITFOR'));
@@ -163,7 +183,7 @@ async function testKillProcessReal(engineId, engineConfig, connector) {
       } else {
         assert(`${label} victim query found`, false, 'WAITFOR not visible in process list (may need VIEW SERVER STATE)');
       }
-      conn.close();
+      try { conn.close(); } catch {}
 
     } else if (engineType === 'oracle') {
       const conn = await oracledb.getConnection({ user: 'testuser', password: 'testpassword', connectString: '127.0.0.1:11521/XEPDB1' });
@@ -205,7 +225,7 @@ async function testKillProcessReal(engineId, engineConfig, connector) {
         assert(`${label} victim op found`, false, 'No operations visible in currentOp (may need clusterOps privilege)');
       }
       try { await victimPromise; } catch {}
-      await client.close();
+      try { await client.close(); } catch {}
     }
 
     if (!victimPid) {
@@ -221,6 +241,21 @@ async function testHealthCheckReplication(engineId, engineConfig, connector) {
     const repl = await connector.listReplicationStatus(engineId, engineConfig);
     assert(`${label} returns not_configured`, repl.status === 'not_configured', `got: ${repl.status}`);
   } catch (e) { assert(`${label}`, false, e.message); }
+}
+
+// Guard: a harness bug or unreachable DB must fail loudly instead of hanging the suite.
+async function withTimeout(promise, ms, label) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} — timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function main() {
@@ -240,14 +275,18 @@ async function main() {
 
     // Kill tests — dry-run is safe, real kill creates+terminates a victim
     await testKillProcessDryRun(engineId, engineConfig, connector);
-    await testKillProcessReal(engineId, engineConfig, connector);
+    try {
+      await withTimeout(testKillProcessReal(engineId, engineConfig, connector), 90000, `${engineId} kill-process real`);
+    } catch (e) {
+      assert(`${engineId} kill-process real did not hang`, false, e.message);
+    }
   }
 
   // Print results
   console.log('\n============================================');
   console.log(' RESULTS');
   console.log('============================================');
-  for (const r of results) console.log(r);
+  // Per-assert lines stream live via assert(); the summary below is the aggregate.
   console.log(`\n  ${passed} passed, ${failed} failed`);
   console.log('============================================\n');
 
