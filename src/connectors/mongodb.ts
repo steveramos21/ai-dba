@@ -1,4 +1,4 @@
-import { MongoClient, type Db } from "mongodb";
+import type { MongoClient, Db } from "mongodb";
 import type { EngineConfig } from "../config.js";
 import type {
   DatabaseConnector,
@@ -20,6 +20,13 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+
+// Driver loaded on FIRST use, never at module load — keeps CLI/MCP
+// startup free of driver cost. Guarded by npm run test:coldstart.
+let driverPromise: Promise<typeof import("mongodb")> | undefined;
+function loadDriver(): Promise<typeof import("mongodb")> {
+  return (driverPromise ??= import("mongodb"));
+}
 
 /**
  * Parse a mongodb:// connection URL.
@@ -52,6 +59,7 @@ export class MongoDbConnector implements DatabaseConnector {
         ? parseMongoUrl(config.url)
         : { uri: `mongodb://${config.host || "localhost"}:${config.port || 27017}`, database: config.database || "admin" };
 
+      const { MongoClient } = await loadDriver();
       client = new MongoClient(uri);
       await client.connect();
       this.clients.set(engineId, client);

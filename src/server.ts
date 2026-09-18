@@ -1,11 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { AiDbaConfig } from "./config.js";
-import type { DatabaseConnector } from "./connector.js";
-import { mysqlConnector } from "./connectors/mysql.js";
-import { postgresConnector } from "./connectors/postgres.js";
-import { sqlserverConnector } from "./connectors/sqlserver.js";
-import { oracleConnector } from "./connectors/oracle.js";
-import { mongodbConnector } from "./connectors/mongodb.js";
+import { buildConnectorMap, shutdown } from "./connector-map.js";
 import { registerBlockingChainsTool } from "./tools/blocking-chains.js";
 import { registerDatabasesTool } from "./tools/databases.js";
 import { registerTablesTool } from "./tools/tables.js";
@@ -20,19 +15,6 @@ import { registerKillProcessTool } from "./tools/kill-process.js";
 import { registerReplicationStatusTool } from "./tools/replication-status.js";
 import { registerServerVariablesTool } from "./tools/server-variables.js";
 import { registerServerStatusTool } from "./tools/server-status.js";
-
-/**
- * Build the connector map for all supported engine types.
- */
-export function buildConnectorMap(): Record<string, DatabaseConnector> {
-  return {
-    mysql: mysqlConnector,
-    postgres: postgresConnector,
-    sqlserver: sqlserverConnector,
-    oracle: oracleConnector,
-    mongodb: mongodbConnector,
-  };
-}
 
 /**
  * Create and configure the AI-DBA diagnostics MCP server.
@@ -64,13 +46,6 @@ export function createServer(config: AiDbaConfig): McpServer {
   return server;
 }
 
-/**
- * Graceful shutdown: close all database pools across all connectors.
- * @param connectors Connector map (defaults to all registered connectors)
- */
-export async function shutdown(connectors?: Record<string, DatabaseConnector>): Promise<void> {
-  const map = connectors ?? buildConnectorMap();
-  for (const connector of Object.values(map)) {
-    await connector.closeAllPools();
-  }
-}
+// Re-exported for compatibility — the `serve` command imports both from here.
+// New code should import from "./connector-map.js" directly.
+export { buildConnectorMap, shutdown };

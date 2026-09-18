@@ -1,4 +1,4 @@
-import mysql, { type Pool, type RowDataPacket } from "mysql2/promise";
+import type { Pool, RowDataPacket } from "mysql2/promise";
 import { resolveMysqlConfig } from "../config.js";
 import type { EngineConfig } from "../config.js";
 import type {
@@ -22,12 +22,20 @@ import type {
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
 
+// Driver loaded on FIRST use, never at module load — keeps CLI/MCP
+// startup free of driver cost. Guarded by npm run test:coldstart.
+let driverPromise: Promise<typeof import("mysql2/promise")> | undefined;
+function loadDriver(): Promise<typeof import("mysql2/promise")> {
+  return (driverPromise ??= import("mysql2/promise"));
+}
+
 export class MySQLConnector implements DatabaseConnector {
   private pools: Map<string, Pool> = new Map();
 
-  getPool(engineId: string, config: EngineConfig): Pool {
+  async getPool(engineId: string, config: EngineConfig): Promise<Pool> {
     let pool = this.pools.get(engineId);
     if (!pool) {
+      const mysql = await loadDriver();
       if (config.url) {
         pool = mysql.createPool(config.url);
       } else {
@@ -46,7 +54,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const [rows] = await connection.query<RowDataPacket[]>(
@@ -63,7 +71,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async listTables(engineId: string, config: EngineConfig, database?: string): Promise<TableInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const resolved = config.url ? resolveMysqlConfig(engineId, config) : undefined;
@@ -86,7 +94,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async describeTable(engineId: string, config: EngineConfig, tableName: string, database?: string): Promise<ColumnInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const resolved = config.url ? resolveMysqlConfig(engineId, config) : undefined;
@@ -120,7 +128,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async listIndexes(engineId: string, config: EngineConfig, tableName: string, database?: string): Promise<IndexInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const resolved = config.url ? resolveMysqlConfig(engineId, config) : undefined;
@@ -153,7 +161,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async listTableSizes(engineId: string, config: EngineConfig, database?: string): Promise<TableSizeInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const resolved = config.url ? resolveMysqlConfig(engineId, config) : undefined;
@@ -188,7 +196,7 @@ export class MySQLConnector implements DatabaseConnector {
 
   async explainQuery(engineId: string, config: EngineConfig, query: string, _options?: ExplainOptions): Promise<ExplainResult> {
     // MySQL does not support EXPLAIN ANALYZE — the analyze flag is silently ignored.
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const [rows] = await connection.query<RowDataPacket[]>(
@@ -219,7 +227,7 @@ export class MySQLConnector implements DatabaseConnector {
   async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       // MySQL: performance_schema.events_statements_summary_by_digest
@@ -268,7 +276,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async listProcesses(engineId: string, config: EngineConfig): Promise<ProcessInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const [rows] = await connection.query<RowDataPacket[]>(
@@ -303,7 +311,7 @@ export class MySQLConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, SHOW, EXPLAIN, DESCRIBE, DESC) are allowed for now.");
     }
 
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const [rows, fields] = await connection.query<RowDataPacket[]>(sql);
@@ -322,7 +330,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async getBlockingChains(engineId: string, config: EngineConfig): Promise<BlockingChain[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       // MySQL 8.0+ uses performance_schema.data_lock_waits (INNODB_LOCK_WAITS was removed)
@@ -389,7 +397,7 @@ export class MySQLConnector implements DatabaseConnector {
       return { success: false, found: false, pid, engineId, error: `Write operations disabled for engine "${engineId}". Set allowWriteOps: true in config.yaml.` };
     }
 
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       // Look up the process
@@ -481,7 +489,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async listReplicationStatus(engineId: string, config: EngineConfig): Promise<ReplicationStatus> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       // MySQL 8.0+ uses SHOW REPLICA STATUS; older uses SHOW SLAVE STATUS
@@ -533,7 +541,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async listServerVariables(engineId: string, config: EngineConfig): Promise<ServerVariable[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const [rows] = await connection.query<RowDataPacket[]>(
@@ -554,7 +562,7 @@ export class MySQLConnector implements DatabaseConnector {
   }
 
   async listServerStatus(engineId: string, config: EngineConfig): Promise<ServerStatusMetric[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
       const [rows] = await connection.query<RowDataPacket[]>(

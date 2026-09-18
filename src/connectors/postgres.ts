@@ -1,4 +1,4 @@
-import pg, { type Pool } from "pg";
+import type { Pool } from "pg";
 import type { EngineConfig } from "../config.js";
 import type {
   DatabaseConnector,
@@ -21,12 +21,20 @@ import type {
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
 
+// Driver loaded on FIRST use, never at module load — keeps CLI/MCP
+// startup free of driver cost. Guarded by npm run test:coldstart.
+let driverPromise: Promise<typeof import("pg")> | undefined;
+function loadDriver(): Promise<typeof import("pg")> {
+  return (driverPromise ??= import("pg"));
+}
+
 export class PostgreSQLConnector implements DatabaseConnector {
   private pools: Map<string, Pool> = new Map();
 
-  getPool(engineId: string, config: EngineConfig): Pool {
+  async getPool(engineId: string, config: EngineConfig): Promise<Pool> {
     let pool = this.pools.get(engineId);
     if (!pool) {
+      const pg = await loadDriver();
       pool = new pg.Pool({
         connectionString: config.url,
         max: 5,
@@ -37,7 +45,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       const res = await client.query(
@@ -53,7 +61,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async listTables(engineId: string, config: EngineConfig, database?: string): Promise<TableInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       if (database) {
@@ -74,7 +82,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async describeTable(engineId: string, config: EngineConfig, tableName: string, database?: string): Promise<ColumnInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       let schema = "public";
@@ -124,7 +132,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async listIndexes(engineId: string, config: EngineConfig, tableName: string, database?: string): Promise<IndexInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       let schema = "public";
@@ -165,7 +173,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async listTableSizes(engineId: string, config: EngineConfig, database?: string): Promise<TableSizeInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       if (database) {
@@ -222,7 +230,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
 
   async explainQuery(engineId: string, config: EngineConfig, query: string, options?: ExplainOptions): Promise<ExplainResult> {
     const analyze = options?.analyze ?? false;
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       const options_ = analyze ? "FORMAT JSON, ANALYZE, BUFFERS" : "FORMAT JSON";
@@ -251,7 +259,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       // pg_stat_statements — requires the extension to be installed
@@ -294,7 +302,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async listProcesses(engineId: string, config: EngineConfig): Promise<ProcessInfo[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       const res = await client.query(
@@ -329,7 +337,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, SHOW, EXPLAIN, DESCRIBE, DESC) are allowed for now.");
     }
 
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       const res = await client.query(sql);
@@ -348,7 +356,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async getBlockingChains(engineId: string, config: EngineConfig): Promise<BlockingChain[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       const res = await client.query(
@@ -411,7 +419,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
       return { success: false, found: false, pid, engineId, error: `Write operations disabled for engine "${engineId}". Set allowWriteOps: true in config.yaml.` };
     }
 
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       // Look up the process
@@ -487,7 +495,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async listReplicationStatus(engineId: string, config: EngineConfig): Promise<ReplicationStatus> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       // Check if this is a primary with replicas
@@ -533,7 +541,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async listServerVariables(engineId: string, config: EngineConfig): Promise<ServerVariable[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       const res = await client.query(
@@ -563,7 +571,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
   }
 
   async listServerStatus(engineId: string, config: EngineConfig): Promise<ServerStatusMetric[]> {
-    const pool = this.getPool(engineId, config);
+    const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
       const res = await client.query(

@@ -1,4 +1,3 @@
-import oracledb from "oracledb";
 import type { EngineConfig } from "../config.js";
 import type {
   DatabaseConnector,
@@ -20,6 +19,13 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+
+// Driver loaded on FIRST use, never at module load — keeps CLI/MCP
+// startup free of driver cost. Guarded by npm run test:coldstart.
+let driverPromise: Promise<typeof import("oracledb")> | undefined;
+function loadDriver(): Promise<typeof import("oracledb")> {
+  return (driverPromise ??= import("oracledb"));
+}
 
 /**
  * Parse an oracle:// connection URL into oracledb connect options.
@@ -62,6 +68,7 @@ export class OracleConnector implements DatabaseConnector {
             connectString: `${config.host || "localhost"}:${config.port || 1521}/${config.database || "XE"}`,
           };
 
+      const { default: oracledb } = await loadDriver();
       pool = await oracledb.createPool({
         user: cfg.user,
         password: cfg.password,

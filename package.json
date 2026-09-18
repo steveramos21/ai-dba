@@ -15,6 +15,7 @@
     "connect": "node dist/index.js --config config.yaml connect",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coldstart": "node test/mcp-coldstart.mjs",
     "test:integration": "node test/integration-all.mjs",
     "test:integration:sprint8": "node test/integration-sprint8.mjs",
     "test:integration:sprint9": "node test/integration-sprint9.mjs",

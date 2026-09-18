@@ -1,4 +1,4 @@
-import { Connection, Request, type ConnectionConfiguration } from "tedious";
+import type { Connection, ConnectionConfiguration } from "tedious";
 import type { EngineConfig } from "../config.js";
 import type {
   DatabaseConnector,
@@ -20,6 +20,13 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+
+// Driver loaded on FIRST use, never at module load — keeps CLI/MCP
+// startup free of driver cost. Guarded by npm run test:coldstart.
+let driverPromise: Promise<typeof import("tedious")> | undefined;
+function loadDriver(): Promise<typeof import("tedious")> {
+  return (driverPromise ??= import("tedious"));
+}
 
 /**
  * Parse a sqlserver:// connection URL into tedious config options.
@@ -52,9 +59,11 @@ export function parseSqlServerUrl(url: string): {
 /** Promise-based wrapper around a single tedious Connection */
 class TediousConnection {
   private conn: Connection;
+  private tedious: typeof import("tedious");
 
-  constructor(config: ConnectionConfiguration) {
-    this.conn = new Connection(config);
+  constructor(tedious: typeof import("tedious"), config: ConnectionConfiguration) {
+    this.tedious = tedious;
+    this.conn = new tedious.Connection(config);
   }
 
   connect(): Promise<void> {
@@ -74,7 +83,7 @@ class TediousConnection {
       const rows: Record<string, unknown>[] = [];
       let columns: string[] = [];
 
-      const request = new Request(sql, (err) => {
+      const request = new this.tedious.Request(sql, (err) => {
         if (err) reject(err);
         else resolve({ columns, rows });
       });
@@ -118,7 +127,8 @@ export class SqlServerConnector implements DatabaseConnector {
             database: config.database || "",
           };
 
-      conn = new TediousConnection({
+      const tedious = await loadDriver();
+      conn = new TediousConnection(tedious, {
         server: cfg.server,
         authentication: {
           type: "default",
