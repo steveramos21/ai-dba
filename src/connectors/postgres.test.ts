@@ -2,6 +2,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { PostgreSQLConnector } from "./postgres.js";
 import type { EngineConfig } from "../config.js";
 
+const { poolCtorMock } = vi.hoisted(() => ({ poolCtorMock: vi.fn() }));
+
+// Mock the pg driver (loaded lazily via import() on first use).
+vi.mock("pg", () => ({
+  Pool: poolCtorMock,
+  default: { Pool: poolCtorMock },
+}));
+
+
 describe("PostgreSQLConnector", () => {
   let connector: PostgreSQLConnector;
   const mockConfig: EngineConfig = { type: "postgres", url: "postgresql://postgres@localhost:5432/testdb" };
@@ -132,5 +141,27 @@ describe("PostgreSQLConnector", () => {
     expect(sql).toContain("query_start");
     expect(sql).toContain("pg_stat_activity");
     expect(sql).not.toContain("state_change");
+  });
+});
+
+describe("PostgreSQLConnector — cold-start concurrency", () => {
+  const mockConfig: EngineConfig = {
+    type: "postgres",
+    url: "postgresql://postgres@localhost:5432/testdb",
+  };
+
+  it("de-duplicates concurrent pool creation on a cold engine", async () => {
+    const sentinel = { end: vi.fn(), connect: vi.fn() };
+    poolCtorMock.mockImplementation(() => sentinel);
+
+    const connector = new PostgreSQLConnector();
+    const [a, b] = await Promise.all([
+      connector.getPool("dedupe-engine", mockConfig),
+      connector.getPool("dedupe-engine", mockConfig),
+    ]);
+
+    expect(a).toBe(sentinel);
+    expect(b).toBe(sentinel);
+    expect(poolCtorMock).toHaveBeenCalledTimes(1);
   });
 });
