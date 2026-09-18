@@ -151,7 +151,7 @@ describe("PostgreSQLConnector — cold-start concurrency", () => {
   };
 
   it("de-duplicates concurrent pool creation on a cold engine", async () => {
-    const sentinel = { end: vi.fn(), connect: vi.fn() };
+    const sentinel = { end: vi.fn(), connect: vi.fn(), on: vi.fn() };
     poolCtorMock.mockImplementation(() => sentinel);
 
     const connector = new PostgreSQLConnector();

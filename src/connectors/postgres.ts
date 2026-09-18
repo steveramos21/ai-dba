@@ -43,6 +43,11 @@ export class PostgreSQLConnector implements DatabaseConnector {
         connectionString: config.url,
         max: 5,
       });
+      // Server-side termination of an idle pooled client (restart, admin kill)
+      // emits 'error'; without a listener that crashes long-running `serve`.
+      pool.on("error", (err: Error) => {
+        console.error(`[ai-dba] PostgreSQL pool error (${engineId}): ${err.message}`);
+      });
       this.pools.set(engineId, pool);
       return pool;
     })().finally(() => this.creatingPools.delete(engineId));
