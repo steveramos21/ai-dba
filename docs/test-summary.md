@@ -4,7 +4,8 @@
 
 | Type | Count | Command |
 |------|-------|---------|
-| Unit tests | 94 | `npm test` |
+| Unit tests | 96 | `npm test` |
+| Cold-start guard | 3 checks | `npm run test:coldstart` |
 | Integration tests (Sprints 1-7) | 121 | `npm run test:integration` |
 | Integration tests (Sprint 8) | 84 | `npm run test:integration:sprint8` |
 | Integration tests (Sprint 9) | ~30 | `npm run test:integration:sprint9` |
@@ -16,7 +17,7 @@
 npm test
 ```
 
-No Docker required. Tests URL parsers, MCP tool dispatch logic, and SQL guard validation. 94 tests across 19 files covering:
+No Docker required. Tests URL parsers, MCP tool dispatch logic, SQL guard validation, and cold-start pool de-duplication. 96 tests across 19 files covering:
 
 - URL parsers (`parseMysqlUrl`, `parsePostgresUrl`, `parseSqlServerUrl`, `parseOracleUrl`, `parseMongoUrl`)
 - MCP tool dispatch (happy path, unknown engine, unsupported type, connector error propagation)
@@ -64,6 +65,6 @@ See [Testing Guide](testing-guide.md) for comprehensive per-engine manual test p
 GitHub Actions runs on every push/PR to main:
 
 - Node 20.x and 22.x matrix
-- `npm ci` → `npm run build` → `npm test` (94 unit tests)
+- `npm ci` → `npm run build` → `npm test` (96 unit tests) → `npm run test:coldstart` (startup guard)
 - CLI entry point verification
 - Integration tests excluded (require 5 Docker containers)

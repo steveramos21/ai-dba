@@ -88,6 +88,7 @@ URL is the canonical format. Postgres URLs pass directly to `pg.Pool({ connectio
 - Mock driver pools via `vi.fn()` on the private `pools` Map using `@ts-expect-error`
 - **Integration tests**: `test/test-blocking.mjs` requires `docker compose up -d` first
 - Run `npm test` after any connector or tool change
+- **Cold-start guard**: `npm run test:coldstart` — scans `dist/` for static driver imports and measures MCP/CLI startup (run after `npm run build`)
 
 ## Branch & PR Conventions (from SPRINT.md)
 
