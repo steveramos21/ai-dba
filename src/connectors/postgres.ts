@@ -30,20 +30,25 @@ function loadDriver(): Promise<typeof import("pg")> {
 
 export class PostgreSQLConnector implements DatabaseConnector {
   private pools: Map<string, Pool> = new Map();
+  private creatingPools: Map<string, Promise<Pool>> = new Map();
 
   async getPool(engineId: string, config: EngineConfig): Promise<Pool> {
-    let pool = this.pools.get(engineId);
-    if (!pool) {
+    const cached = this.pools.get(engineId);
+    if (cached) return cached;
+    const inFlight = this.creatingPools.get(engineId);
+    if (inFlight) return inFlight;
+    const creating = (async () => {
       const pg = await loadDriver();
-      pool = new pg.Pool({
+      const pool = new pg.Pool({
         connectionString: config.url,
         max: 5,
       });
       this.pools.set(engineId, pool);
-    }
-    return pool;
+      return pool;
+    })().finally(() => this.creatingPools.delete(engineId));
+    this.creatingPools.set(engineId, creating);
+    return creating;
   }
-
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
     const pool = await this.getPool(engineId, config);
     const client = await pool.connect();

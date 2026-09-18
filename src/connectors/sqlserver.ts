@@ -113,10 +113,14 @@ class TediousConnection {
 
 export class SqlServerConnector implements DatabaseConnector {
   private connections: Map<string, TediousConnection> = new Map();
+  private creatingConnections: Map<string, Promise<TediousConnection>> = new Map();
 
   private async getConnection(engineId: string, config: EngineConfig): Promise<TediousConnection> {
-    let conn = this.connections.get(engineId);
-    if (!conn) {
+    const cached = this.connections.get(engineId);
+    if (cached) return cached;
+    const inFlight = this.creatingConnections.get(engineId);
+    if (inFlight) return inFlight;
+    const creating = (async () => {
       const cfg = config.url
         ? parseSqlServerUrl(config.url)
         : {
@@ -128,7 +132,7 @@ export class SqlServerConnector implements DatabaseConnector {
           };
 
       const tedious = await loadDriver();
-      conn = new TediousConnection(tedious, {
+      const conn = new TediousConnection(tedious, {
         server: cfg.server,
         authentication: {
           type: "default",
@@ -147,10 +151,11 @@ export class SqlServerConnector implements DatabaseConnector {
 
       await conn.connect();
       this.connections.set(engineId, conn);
-    }
-    return conn;
+      return conn;
+    })().finally(() => this.creatingConnections.delete(engineId));
+    this.creatingConnections.set(engineId, creating);
+    return creating;
   }
-
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
     const conn = await this.getConnection(engineId, config);
     const { rows } = await conn.execSql(

@@ -51,25 +51,31 @@ export function parseMongoUrl(url: string): { uri: string; database: string } {
 
 export class MongoDbConnector implements DatabaseConnector {
   private clients: Map<string, MongoClient> = new Map();
+  private creatingClients: Map<string, Promise<{ client: MongoClient; db: Db; database: string }>> = new Map();
 
   private async getClient(engineId: string, config: EngineConfig): Promise<{ client: MongoClient; db: Db; database: string }> {
-    let client = this.clients.get(engineId);
-    if (!client) {
+    const cached = this.clients.get(engineId);
+    if (cached) {
+      // Extract database from URL for the existing client
+      const { database } = config.url ? parseMongoUrl(config.url) : { database: config.database || "admin" };
+      return { client: cached, db: cached.db(database), database };
+    }
+    const inFlight = this.creatingClients.get(engineId);
+    if (inFlight) return inFlight;
+    const creating = (async () => {
       const { uri, database } = config.url
         ? parseMongoUrl(config.url)
         : { uri: `mongodb://${config.host || "localhost"}:${config.port || 27017}`, database: config.database || "admin" };
 
       const { MongoClient } = await loadDriver();
-      client = new MongoClient(uri);
+      const client = new MongoClient(uri);
       await client.connect();
       this.clients.set(engineId, client);
       return { client, db: client.db(database), database };
-    }
-    // Extract database from URL for existing client
-    const { database } = config.url ? parseMongoUrl(config.url) : { database: config.database || "admin" };
-    return { client, db: client.db(database), database };
+    })().finally(() => this.creatingClients.delete(engineId));
+    this.creatingClients.set(engineId, creating);
+    return creating;
   }
-
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
     const { client } = await this.getClient(engineId, config);
     const admin = client.db().admin();

@@ -56,10 +56,14 @@ export function parseOracleUrl(url: string): {
 
 export class OracleConnector implements DatabaseConnector {
   private pools: Map<string, any> = new Map();
+  private creatingPools: Map<string, Promise<any>> = new Map();
 
   private async getPool(engineId: string, config: EngineConfig): Promise<any> {
-    let pool = this.pools.get(engineId);
-    if (!pool) {
+    const cached = this.pools.get(engineId);
+    if (cached) return cached;
+    const inFlight = this.creatingPools.get(engineId);
+    if (inFlight) return inFlight;
+    const creating = (async () => {
       const cfg = config.url
         ? parseOracleUrl(config.url)
         : {
@@ -69,7 +73,7 @@ export class OracleConnector implements DatabaseConnector {
           };
 
       const { default: oracledb } = await loadDriver();
-      pool = await oracledb.createPool({
+      const pool = await oracledb.createPool({
         user: cfg.user,
         password: cfg.password,
         connectString: cfg.connectString,
@@ -78,10 +82,11 @@ export class OracleConnector implements DatabaseConnector {
         poolIncrement: 1,
       });
       this.pools.set(engineId, pool);
-    }
-    return pool;
+      return pool;
+    })().finally(() => this.creatingPools.delete(engineId));
+    this.creatingPools.set(engineId, creating);
+    return creating;
   }
-
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
     const pool = await this.getPool(engineId, config);
     const conn = await pool.getConnection();

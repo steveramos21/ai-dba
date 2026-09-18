@@ -31,28 +31,33 @@ function loadDriver(): Promise<typeof import("mysql2/promise")> {
 
 export class MySQLConnector implements DatabaseConnector {
   private pools: Map<string, Pool> = new Map();
+  private creatingPools: Map<string, Promise<Pool>> = new Map();
 
   async getPool(engineId: string, config: EngineConfig): Promise<Pool> {
-    let pool = this.pools.get(engineId);
-    if (!pool) {
+    const cached = this.pools.get(engineId);
+    if (cached) return cached;
+    // De-duplicate concurrent first calls — without this, two parallel tool
+    // calls on a cold engine each create a pool and one is leaked.
+    const inFlight = this.creatingPools.get(engineId);
+    if (inFlight) return inFlight;
+    const creating = (async () => {
       const mysql = await loadDriver();
-      if (config.url) {
-        pool = mysql.createPool(config.url);
-      } else {
-        pool = mysql.createPool({
-          host: config.host,
-          port: config.port,
-          user: config.user,
-          password: config.password,
-          database: config.database,
-          ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
-        });
-      }
+      const pool = config.url
+        ? mysql.createPool(config.url)
+        : mysql.createPool({
+            host: config.host,
+            port: config.port,
+            user: config.user,
+            password: config.password,
+            database: config.database,
+            ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
+          });
       this.pools.set(engineId, pool);
-    }
-    return pool;
+      return pool;
+    })().finally(() => this.creatingPools.delete(engineId));
+    this.creatingPools.set(engineId, creating);
+    return creating;
   }
-
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
     const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
