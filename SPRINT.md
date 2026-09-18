@@ -391,6 +391,7 @@ _None — all Sprint 8 features are complete._
 - **94 unit tests** across **19 test files**, all passing
 - **~30 integration tests** (requires Docker + `allowWriteOps: true`)
 - **~330 total tests** (cumulative)
+- _Post-Sprint-10 correction: this suite had never completed a run at the time of this retro (harness hang — see the Sprint 10 section below). Its first complete run is **115 passed / 0 failed**; cumulative totals are now **437**._
 - 14 MCP tools registered
 - 14 CLI commands, 14 REPL commands
 

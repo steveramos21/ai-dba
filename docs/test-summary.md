@@ -5,11 +5,13 @@
 | Type | Count | Command |
 |------|-------|---------|
 | Unit tests | 96 | `npm test` |
-| Cold-start guard | 3 checks | `npm run test:coldstart` |
 | Integration tests (Sprints 1-7) | 121 | `npm run test:integration` |
 | Integration tests (Sprint 8) | 84 | `npm run test:integration:sprint8` |
 | Integration tests (Sprint 9) | 115 | `npm run test:integration:sprint9` |
+| Integration tests (blocking scenarios) | 21 | `npm run test:blocking` |
 | **Total** | **437** | |
+
+Plus a 3-check cold-start guard (`npm run test:coldstart`): scans `dist/` for static driver imports and enforces MCP/CLI startup ceilings — wired into CI.
 
 ## Unit Tests
 
@@ -32,7 +34,8 @@ docker compose up -d
 # Wait for all healthy
 npm run test:integration       # 121 tests (Sprints 1-7)
 npm run test:integration:sprint8  # 84 tests (Sprint 8)
-npm run test:integration:sprint9  # ~30 tests (Sprint 9)
+npm run test:integration:sprint9  # 115 tests (Sprint 9)
+npm run test:blocking             # 21 tests (blocking scenarios)
 ```
 
 Tests all 14 connector methods against live MySQL 8.0, PostgreSQL 16, SQL Server 2022, Oracle XE 21, and MongoDB 7.
