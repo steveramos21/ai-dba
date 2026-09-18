@@ -391,7 +391,7 @@ _None — all Sprint 8 features are complete._
 - **94 unit tests** across **19 test files**, all passing
 - **~30 integration tests** (requires Docker + `allowWriteOps: true`)
 - **~330 total tests** (cumulative)
-- _Post-Sprint-10 correction: this suite had never completed a run at the time of this retro (harness hang — see the Sprint 10 section below). Its first complete run is **115 passed / 0 failed**; cumulative totals are now **437**._
+- _Post-Sprint-10 correction: this suite had never completed a run at the time of this retro (harness hang — see the Sprint 10 section below). Its first complete run is **115 passed / 0 failed**; cumulative totals are now **439**._
 - 14 MCP tools registered
 - 14 CLI commands, 14 REPL commands
 
@@ -435,12 +435,13 @@ Residual ~8 s MCP startup on 9p is the MCP SDK import itself (~6.8 s standalone 
 - Build clean (tsc, 0 errors)
 - **96 unit tests** / 19 files
 - Cold-start guard 3/3
-- Integration: 121 (Sprints 1-7) + 84 (Sprint 8) + 21 (blocking) + 115 (Sprint 9) = 341 integration tests; + 96 unit tests = 437 total, all passing
+- Integration: 121 (Sprints 1-7) + 86 (Sprint 8) + 21 (blocking) + 115 (Sprint 9) = 343 integration tests; + 96 unit tests = 439 total, all passing
 
 ### Review round (2026-09-19)
 - Independent review of `ff9ec74..271758b`: **4/5 — no blockers, no majors** (9 findings: 5 minor, 4 nit).
 - Fixed: driver-load memo retry (all 5 connectors), guard side-effect-import regex, CLI stderr assertion, 9p ceiling 12s→15s, test-math in this file, sprint9 dead code.
 - Accepted with rationale (see PR #23): oracle victim fallback (test-only), `.gitignore` symlink pattern (intentional).
+- **Post-review consolidated run caught a latent product bug:** Oracle `listSlowQueries` selected `max_elapsed_time` (a SQL Server DMV name) from `v$sqlarea` → ORA-00904 — latent since Sprint 8 because ORA-00942 was swallowed as graceful-empty and the assert **false-passed**. Fixed in `4e6de0c` (`NULL AS max_time_us` + null-guard); sprint8 re-run **86/0**. Oracle `maxExecutionTimeMs` is now permanently `undefined` (v$sqlarea has no per-query max) — do not "restore" it.
 
 ### Deferred to "Trust & Speed, Part 2"
 - Safety layer: row limits (default 1000 + honest truncation flag) and per-engine query/connect timeouts
@@ -449,3 +450,4 @@ Residual ~8 s MCP startup on 9p is the MCP SDK import itself (~6.8 s standalone 
 - LICENSE + npm packaging metadata (`bin`, `files`, `repository`)
 - Docs auto-deploy on CI (gh-pages stale since Sprint 8)
 - Behavioral test for the driver-load retry path (vitest factory-caching semantics need validation) — deferred with the 3 connector parity tests
+- Empty-result "graceful degradation" can mask real bugs (it hid the Oracle ORA-00904 for two sprints) — add a `degraded`/notes flag to empty results so privilege changes can't hide column bugs

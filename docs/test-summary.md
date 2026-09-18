@@ -6,10 +6,10 @@
 |------|-------|---------|
 | Unit tests | 96 | `npm test` |
 | Integration tests (Sprints 1-7) | 121 | `npm run test:integration` |
-| Integration tests (Sprint 8) | 84 | `npm run test:integration:sprint8` |
+| Integration tests (Sprint 8) | 86 | `npm run test:integration:sprint8` |
 | Integration tests (Sprint 9) | 115 | `npm run test:integration:sprint9` |
 | Integration tests (blocking scenarios) | 21 | `npm run test:blocking` |
-| **Total** | **437** | |
+| **Total** | **439** | |
 
 Plus a 3-check cold-start guard (`npm run test:coldstart`): scans `dist/` for static driver imports and enforces MCP/CLI startup ceilings — wired into CI.
 
@@ -33,12 +33,14 @@ Requires 5 Docker containers:
 docker compose up -d
 # Wait for all healthy
 npm run test:integration       # 121 tests (Sprints 1-7)
-npm run test:integration:sprint8  # 84 tests (Sprint 8)
+npm run test:integration:sprint8  # 86 tests (Sprint 8)
 npm run test:integration:sprint9  # 115 tests (Sprint 9)
 npm run test:blocking             # 21 tests (blocking scenarios)
 ```
 
 Tests all 14 connector methods against live MySQL 8.0, PostgreSQL 16, SQL Server 2022, Oracle XE 21, and MongoDB 7.
+
+**Sprint 8 count:** 86 tests with the Oracle grants applied (`test/oracle-grants.sql`); 84 without — the Oracle slow-queries asserts are data-dependent.
 
 ### Bugs Caught by Integration Testing
 
@@ -50,7 +52,8 @@ Tests all 14 connector methods against live MySQL 8.0, PostgreSQL 16, SQL Server
 | 5 | Oracle | 6 | `user_objects` has no `OWNER` column |
 | 6 | MongoDB | 1 | `_id_` index doesn't set `unique: true` |
 | 8 | SQL Server | 1 | `SELECT * FROM t LIMIT 1` fails — SQL Server uses `TOP 1` |
-| **Total** | | **17** | |
+| 10 | Oracle | 1 | `v$sqlarea` has no `max_elapsed_time` — masked by ORA-00942 graceful-empty (false pass since Sprint 8) |
+| **Total** | | **18** | |
 
 ## Manual Testing
 
