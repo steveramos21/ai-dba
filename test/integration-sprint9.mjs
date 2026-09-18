@@ -190,7 +190,11 @@ async function testKillProcessReal(engineId, engineConfig, connector) {
       const victimPromise = conn.execute('BEGIN DBMS_LOCK.SLEEP(30); END;').catch(() => {});
       await new Promise(r => setTimeout(r, 2000));
       const procs = await connector.listProcesses(engineId, engineConfig);
-      const victim = procs.find(p => p.serial != null);
+      // Prefer the session actually running our victim block — the connector's
+      // own pooled session is excluded by listProcesses, but other TESTUSER
+      // sessions can exist; killing one of those would test nothing.
+      const candidates = procs.filter(p => p.serial != null);
+      const victim = candidates.find(p => p.query?.includes('DBMS_LOCK.SLEEP')) || candidates[0];
       if (victim) {
         victimPid = `${victim.pid},${victim.serial}`;
         const dryRun = await connector.killProcess(engineId, engineConfig, victimPid, { dryRun: true });
