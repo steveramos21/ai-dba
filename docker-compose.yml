@@ -48,6 +48,10 @@ services:
       timeout: 5s
       retries: 10
 
+  # NOTE: the sprint9 integration suite needs extra privileges for testuser.
+  # Apply once after first `docker compose up -d` (and again after any `down -v`):
+  #   docker exec -i ai-dba-oracle-test sqlplus -s \
+  #     'sys/testpassword@localhost:1521/XEPDB1 as sysdba' < test/oracle-grants.sql
   oracle-test:
     image: gvenzl/oracle-xe:21-slim
     container_name: ai-dba-oracle-test

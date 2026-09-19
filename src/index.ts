@@ -155,7 +155,7 @@ program
   .description("Show current blocking chains for an engine")
   .option("--json", "Output raw JSON instead of a table")
   .action(async (engineId: string, cmdOpts: { json?: boolean }) => {
-    const { buildConnectorMap, shutdown } = await import("./server.js");
+    const { buildConnectorMap, shutdown } = await import("./connector-map.js");
     const opts = program.opts();
     const config = loadConfig(opts.config);
     const engine = config.engines[engineId];
@@ -227,7 +227,7 @@ program
     }
 
     const { id: engineId, config: engineConfig, maskedUrl } = result;
-    const { buildConnectorMap } = await import("./server.js");
+    const { buildConnectorMap } = await import("./connector-map.js");
     const connectors: Record<string, DatabaseConnector> = buildConnectorMap();
 
     // Verify connection
@@ -300,7 +300,7 @@ program
 // ─── CLI subcommands (databases, tables, describe, indexes, processes) ─
 // Helper: resolve engine from config + get connector
 async function resolveEngine(engineId: string): Promise<{ engine: EngineConfig; connector: DatabaseConnector; connectors: Record<string, DatabaseConnector> }> {
-  const { buildConnectorMap } = await import("./server.js");
+  const { buildConnectorMap } = await import("./connector-map.js");
   const opts = program.opts();
   const config = loadConfig(opts.config);
   const engine = config.engines[engineId];
@@ -1576,7 +1576,7 @@ program
   .command("repl")
   .description("Interactive REPL for database diagnostics")
   .action(async () => {
-    const { buildConnectorMap } = await import("./server.js");
+    const { buildConnectorMap } = await import("./connector-map.js");
     const opts = program.opts();
 
     // Load config if it exists, otherwise start with empty engines

@@ -1,4 +1,3 @@
-import oracledb from "oracledb";
 import type { EngineConfig } from "../config.js";
 import type {
   DatabaseConnector,
@@ -20,6 +19,21 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+
+// Driver loaded on FIRST use, never at module load — keeps CLI/MCP
+// startup free of driver cost. Guarded by npm run test:coldstart.
+let driverPromise: Promise<typeof import("oracledb")> | undefined;
+function loadDriver(): Promise<typeof import("oracledb")> {
+  if (!driverPromise) {
+    driverPromise = import("oracledb").catch((err) => {
+      // Clear the memo on failure so a later call can retry — a transient load
+      // failure must not poison the connector for the process lifetime.
+      driverPromise = undefined;
+      throw err;
+    });
+  }
+  return driverPromise;
+}
 
 /**
  * Parse an oracle:// connection URL into oracledb connect options.
@@ -50,10 +64,14 @@ export function parseOracleUrl(url: string): {
 
 export class OracleConnector implements DatabaseConnector {
   private pools: Map<string, any> = new Map();
+  private creatingPools: Map<string, Promise<any>> = new Map();
 
   private async getPool(engineId: string, config: EngineConfig): Promise<any> {
-    let pool = this.pools.get(engineId);
-    if (!pool) {
+    const cached = this.pools.get(engineId);
+    if (cached) return cached;
+    const inFlight = this.creatingPools.get(engineId);
+    if (inFlight) return inFlight;
+    const creating = (async () => {
       const cfg = config.url
         ? parseOracleUrl(config.url)
         : {
@@ -62,7 +80,8 @@ export class OracleConnector implements DatabaseConnector {
             connectString: `${config.host || "localhost"}:${config.port || 1521}/${config.database || "XE"}`,
           };
 
-      pool = await oracledb.createPool({
+      const { default: oracledb } = await loadDriver();
+      const pool = await oracledb.createPool({
         user: cfg.user,
         password: cfg.password,
         connectString: cfg.connectString,
@@ -71,10 +90,11 @@ export class OracleConnector implements DatabaseConnector {
         poolIncrement: 1,
       });
       this.pools.set(engineId, pool);
-    }
-    return pool;
+      return pool;
+    })().finally(() => this.creatingPools.delete(engineId));
+    this.creatingPools.set(engineId, creating);
+    return creating;
   }
-
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
     const pool = await this.getPool(engineId, config);
     const conn = await pool.getConnection();
@@ -326,7 +346,7 @@ export class OracleConnector implements DatabaseConnector {
           executions       AS exec_count,
           elapsed_time     AS total_time_us,
           elapsed_time / NULLIF(executions, 0) AS avg_time_us,
-          max_elapsed_time AS max_time_us,
+          NULL AS max_time_us, -- v$sqlarea has no per-query max_elapsed_time (SQL Server DMV name); null keeps positional indices stable
           disk_reads,
           buffer_gets,
           rows_processed   AS rows_returned
@@ -344,7 +364,7 @@ export class OracleConnector implements DatabaseConnector {
         executionCount: Number(row[2]) || undefined,
         totalExecutionTimeMs: Math.round(Number(row[3]) / 1000),
         avgExecutionTimeMs: row[4] ? Math.round(Number(row[4]) / 1000) : undefined,
-        maxExecutionTimeMs: Math.round(Number(row[5]) / 1000),
+        maxExecutionTimeMs: row[5] != null ? Math.round(Number(row[5]) / 1000) : undefined,
         rowsReturned: Number(row[8]) || undefined,
       }));
     } catch (e: any) {

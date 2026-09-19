@@ -14,7 +14,7 @@ This guide covers manual testing procedures for all sprints. Each section reflec
 | 6 | MongoDB connector | MERGED | [Sprint 6 - MongoDB](#sprint-6-mongodb) |
 | 8 | Query performance & health | COMPLETE | [Sprint 8 - Performance](#sprint-8-query-performance-health) |
 
-**Test totals:** 94 unit tests + 121 integration tests + 84 Sprint 8 integration tests + ~30 Sprint 9 integration tests = ~330 tests, all passing.
+**Test totals:** 96 unit tests + 121 integration (Sprints 1-7) + 86 (Sprint 8, with `test/oracle-grants.sql`) + 115 (Sprint 9) + 21 blocking = 439 tests, all passing.
 
 ## Prerequisites (all sprints)
 
@@ -39,7 +39,7 @@ docker info | head -3
 npm test
 ```
 
-**Expected:** 19 test files, 94 tests, all passing. Duration ~20s.
+**Expected:** 19 test files, 96 tests, all passing. Duration ~20s.
 
 ### 2. Integration Tests (Docker required)
 
@@ -175,7 +175,7 @@ docker exec ai-dba-sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U 
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 19 test files, 94 tests (includes 4 SQL Server URL parser tests)
+# Expected: 19 test files, 96 tests (includes 4 SQL Server URL parser tests)
 ```
 
 **Step 4: Run integration tests**
@@ -327,7 +327,7 @@ docker exec ai-dba-oracle-test bash -c "echo 'CREATE TABLE blocking_test (id NUM
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 19 test files, 94 tests (includes 4 Oracle URL parser tests)
+# Expected: 19 test files, 96 tests (includes 4 Oracle URL parser tests)
 ```
 
 **Step 4: Run integration tests**
@@ -407,7 +407,7 @@ node dist/index.js --config config.yaml blocking-chains oracle-test --json
 
 ### Known Issues
 
-- **v$ permission fallback:** `listProcesses` and `getBlockingChains` require SELECT ANY DICTIONARY. Without it, they return empty arrays (ORA-00942/ORA-01031 caught gracefully). Grant with: `GRANT SELECT ANY DICTIONARY TO testuser;`
+- **v$ permission fallback:** `listProcesses` and `getBlockingChains` require SELECT ANY DICTIONARY. Without it, they return empty arrays (ORA-00942/ORA-01031 caught gracefully). Grant with: `GRANT SELECT ANY DICTIONARY TO testuser;` The sprint9 kill/observability tests need the full set — apply `test/oracle-grants.sql` (adds DBMS_LOCK + ALTER SYSTEM).
 - **Bind variable names:** `:table` is a reserved bind variable in oracledb. The connector uses `:tbl` instead. Column aliases (`AS name`) also conflict — the connector uses positional indexing (row[0], row[1], etc.).
 - **Uppercase identifiers:** Oracle stores identifiers in uppercase by default. Table names, column names, and index names come back uppercase. The integration test assertions handle both cases.
 - **user_objects vs all_objects:** `user_objects` has no `OWNER` column. The connector uses `USER AS schema` for the default case and `all_objects` (which has `OWNER`) for schema-filtered queries.
@@ -480,7 +480,7 @@ docker exec ai-dba-mongodb-test mongosh "mongodb://testuser:testpassword@127.0.0
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 19 test files, 94 tests (includes 4 MongoDB URL parser tests)
+# Expected: 19 test files, 96 tests (includes 4 MongoDB URL parser tests)
 ```
 
 **Step 4: Run integration tests**
@@ -569,7 +569,7 @@ Run this checklist after all sprints are merged:
 ### Pre-flight
 - [ ] `npm install` — no errors
 - [ ] `npm run build` — TypeScript compiles, 0 errors
-- [ ] `npm test` — 94 unit tests pass
+- [ ] `npm test` — 96 unit tests pass
 - [ ] `docker compose up -d` — all 5 containers healthy (MySQL 13306, PostgreSQL 15432, SQL Server 11433, Oracle 11521, MongoDB 12017)
 
 ### Per-engine verification
@@ -634,13 +634,13 @@ For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb
 
 - All 5 Docker containers running and healthy
 - `npm run build` succeeds with 0 errors
-- `npm test` passes (94 unit tests)
+- `npm test` passes (96 unit tests)
 
 ### Step 1: Run unit tests
 
 ```bash
 npm test
-# Expected: 19 test files, 94 tests, all passing
+# Expected: 19 test files, 96 tests, all passing
 ```
 
 ### Step 2: Run Sprint 8 integration tests

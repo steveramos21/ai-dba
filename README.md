@@ -19,7 +19,7 @@ Universal database copilot — diagnostics, operations, and performance analysis
 - **Replication status** — normalized role, lag, and status across all engines
 - **Server diagnostics** — curated server variables and runtime status metrics
 - **SQL guard** — shared validation module rejects destructive SQL before it reaches connectors
-- **GitHub Actions CI** — build + test on Node 20/22, runs on every push/PR to main
+- **GitHub Actions CI** — build + tests + cold-start guard on Node 20/22, runs on every push/PR to main
 - **Documentation site** — MkDocs Material with 8 pages, light/dark mode, search
 
 ## Documentation
@@ -326,14 +326,16 @@ Add `-v` to also delete the data volume.
 ### Integration tests (require Docker)
 
 ```bash
-# All connector methods against live MySQL + PostgreSQL (49 tests)
+# All connector methods against all 5 live engines (121 tests)
 npm run test:integration
 
 # Live blocking scenarios — creates real locks, validates detection (21 tests)
 npm run test:blocking
 ```
 
-These tests catch bugs that mocked unit tests cannot — they exercise real SQL against MySQL 8.0 and PostgreSQL 16.
+These tests catch bugs that mocked unit tests cannot — they exercise real SQL against MySQL 8.0, PostgreSQL 16, SQL Server 2022, Oracle XE 21, and MongoDB 7.
+
+Additional suites: `npm run test:integration:sprint8`, `npm run test:integration:sprint9` (requires `allowWriteOps: true` — creates and kills real victim sessions).
 
 ## Configuration
 
@@ -400,7 +402,8 @@ engines:
 ```
 src/
   index.ts              CLI entry point (commander, REPL)
-  server.ts             MCP server setup + connector map
+  server.ts             MCP server setup (re-exports buildConnectorMap/shutdown)
+  connector-map.ts      Connector map + shutdown — no MCP SDK import (CLI path)
   config.ts             YAML config loader with URL parsing
   connector.ts          DatabaseConnector interface + shared types (14 methods, BlockingChain, TableSizeInfo, ExplainResult, SlowQueryInfo, KillResult, ReplicationStatus, HealthCheckResult)
   sql-guard.ts          Shared SQL validation (validateReadOnlySql, validateExplainQuery, isJsonCommand)
@@ -430,11 +433,11 @@ src/
 
 - **DatabaseConnector interface** — 14 methods: `listDatabases`, `listTables`, `describeTable`, `listIndexes`, `listProcesses`, `query`, `getBlockingChains`, `listTableSizes`, `explainQuery`, `listSlowQueries`, `killProcess`, `listReplicationStatus`, `listServerVariables`, `listServerStatus`. All 5 engines implement the interface.
 - **sql-guard.ts** — shared validation module used by CLI, REPL, and MCP tool paths. Rejects destructive SQL (INSERT, UPDATE, DELETE, DROP, TRUNCATE, ALTER, CREATE, MERGE, GRANT, REVOKE) using `\b` word-boundary regex.
-- **Lazy imports** — MCP SDK, mysql2, and pg are loaded dynamically only when needed. CLI commands like `list-engines` start instantly without loading database drivers.
+- **Lazy driver loading** — all five drivers (mysql2, pg, tedious, oracledb, mongodb) load on first use, never at startup, and `connector-map.ts` keeps the MCP SDK out of the CLI path. Startup is guarded by `npm run test:coldstart`.
 - **Lazy connection pools** — Database connections are created on first use, not at startup.
 - **One tool per file** — each `src/tools/*.ts` file is self-contained (schema + handler). Adding a new tool means adding a new file and registering it in `server.ts`.
 - **Graceful degradation** — `slow-queries` and `explain` return empty results when engine features are unavailable (extension not installed, permission denied) rather than throwing errors.
-- **GitHub Actions CI** — `.github/workflows/ci.yml` runs build + unit tests on Node 20/22 for every push/PR to main.
+- **GitHub Actions CI** — `.github/workflows/ci.yml` runs build + unit tests + the cold-start guard on Node 20/22 for every push/PR to main.
 
 ## Requirements
 

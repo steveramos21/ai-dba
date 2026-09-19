@@ -33,6 +33,9 @@ jobs:
       - name: Run unit tests
         run: npm test
 
+      - name: Cold-start guard (DB drivers must stay lazy)
+        run: npm run test:coldstart
+
       # Integration tests require 5 Docker database containers:
       # MySQL 13306, PostgreSQL 15432, SQL Server 11433, Oracle 11521, MongoDB 12017
       # Run manually: docker compose up -d && node test/integration-all.mjs

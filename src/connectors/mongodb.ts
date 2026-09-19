@@ -1,4 +1,4 @@
-import { MongoClient, type Db } from "mongodb";
+import type { MongoClient, Db } from "mongodb";
 import type { EngineConfig } from "../config.js";
 import type {
   DatabaseConnector,
@@ -20,6 +20,21 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+
+// Driver loaded on FIRST use, never at module load — keeps CLI/MCP
+// startup free of driver cost. Guarded by npm run test:coldstart.
+let driverPromise: Promise<typeof import("mongodb")> | undefined;
+function loadDriver(): Promise<typeof import("mongodb")> {
+  if (!driverPromise) {
+    driverPromise = import("mongodb").catch((err) => {
+      // Clear the memo on failure so a later call can retry — a transient load
+      // failure must not poison the connector for the process lifetime.
+      driverPromise = undefined;
+      throw err;
+    });
+  }
+  return driverPromise;
+}
 
 /**
  * Parse a mongodb:// connection URL.
@@ -44,24 +59,31 @@ export function parseMongoUrl(url: string): { uri: string; database: string } {
 
 export class MongoDbConnector implements DatabaseConnector {
   private clients: Map<string, MongoClient> = new Map();
+  private creatingClients: Map<string, Promise<{ client: MongoClient; db: Db; database: string }>> = new Map();
 
   private async getClient(engineId: string, config: EngineConfig): Promise<{ client: MongoClient; db: Db; database: string }> {
-    let client = this.clients.get(engineId);
-    if (!client) {
+    const cached = this.clients.get(engineId);
+    if (cached) {
+      // Extract database from URL for the existing client
+      const { database } = config.url ? parseMongoUrl(config.url) : { database: config.database || "admin" };
+      return { client: cached, db: cached.db(database), database };
+    }
+    const inFlight = this.creatingClients.get(engineId);
+    if (inFlight) return inFlight;
+    const creating = (async () => {
       const { uri, database } = config.url
         ? parseMongoUrl(config.url)
         : { uri: `mongodb://${config.host || "localhost"}:${config.port || 27017}`, database: config.database || "admin" };
 
-      client = new MongoClient(uri);
+      const { MongoClient } = await loadDriver();
+      const client = new MongoClient(uri);
       await client.connect();
       this.clients.set(engineId, client);
       return { client, db: client.db(database), database };
-    }
-    // Extract database from URL for existing client
-    const { database } = config.url ? parseMongoUrl(config.url) : { database: config.database || "admin" };
-    return { client, db: client.db(database), database };
+    })().finally(() => this.creatingClients.delete(engineId));
+    this.creatingClients.set(engineId, creating);
+    return creating;
   }
-
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
     const { client } = await this.getClient(engineId, config);
     const admin = client.db().admin();

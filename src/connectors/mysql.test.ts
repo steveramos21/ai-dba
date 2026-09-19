@@ -2,6 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { MySQLConnector } from "./mysql.js";
 import type { EngineConfig } from "../config.js";
 
+const { createPoolMock } = vi.hoisted(() => ({ createPoolMock: vi.fn() }));
+
+// Mock the mysql2 driver: the connector loads it lazily via import() on first
+// use. Mocking lets us assert cold-start pool de-duplication.
+vi.mock("mysql2/promise", () => ({
+  createPool: createPoolMock,
+  default: { createPool: createPoolMock },
+}));
+
+
 describe("MySQLConnector", () => {
   let connector: MySQLConnector;
   const mockConfig: EngineConfig = {
@@ -119,5 +129,36 @@ describe("MySQLConnector", () => {
     expect(sql).toContain("REQUESTING_ENGINE_TRANSACTION_ID");
     expect(sql).toContain("PROCESSLIST_ID");
     expect(sql).not.toContain("INNODB_LOCK_WAITS");
+  });
+});
+
+describe("MySQLConnector — cold-start concurrency", () => {
+  const mockConfig: EngineConfig = {
+    type: "mysql",
+    host: "localhost",
+    port: 3306,
+    user: "root",
+    password: "testpassword",
+    database: "testdb",
+  };
+
+  it("de-duplicates concurrent pool creation on a cold engine", async () => {
+    const sentinel = { end: vi.fn() };
+    createPoolMock.mockReturnValue(sentinel);
+
+    const connector = new MySQLConnector();
+    const [a, b] = await Promise.all([
+      connector.getPool("dedupe-engine", mockConfig),
+      connector.getPool("dedupe-engine", mockConfig),
+    ]);
+
+    expect(a).toBe(sentinel);
+    expect(b).toBe(sentinel);
+    expect(createPoolMock).toHaveBeenCalledTimes(1);
+
+    // Warm path reuses the pooled instance without re-creating
+    const c = await connector.getPool("dedupe-engine", mockConfig);
+    expect(c).toBe(sentinel);
+    expect(createPoolMock).toHaveBeenCalledTimes(1);
   });
 });

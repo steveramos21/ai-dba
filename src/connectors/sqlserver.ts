@@ -1,4 +1,4 @@
-import { Connection, Request, type ConnectionConfiguration } from "tedious";
+import type { Connection, ConnectionConfiguration } from "tedious";
 import type { EngineConfig } from "../config.js";
 import type {
   DatabaseConnector,
@@ -20,6 +20,21 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+
+// Driver loaded on FIRST use, never at module load — keeps CLI/MCP
+// startup free of driver cost. Guarded by npm run test:coldstart.
+let driverPromise: Promise<typeof import("tedious")> | undefined;
+function loadDriver(): Promise<typeof import("tedious")> {
+  if (!driverPromise) {
+    driverPromise = import("tedious").catch((err) => {
+      // Clear the memo on failure so a later call can retry — a transient load
+      // failure must not poison the connector for the process lifetime.
+      driverPromise = undefined;
+      throw err;
+    });
+  }
+  return driverPromise;
+}
 
 /**
  * Parse a sqlserver:// connection URL into tedious config options.
@@ -52,9 +67,11 @@ export function parseSqlServerUrl(url: string): {
 /** Promise-based wrapper around a single tedious Connection */
 class TediousConnection {
   private conn: Connection;
+  private tedious: typeof import("tedious");
 
-  constructor(config: ConnectionConfiguration) {
-    this.conn = new Connection(config);
+  constructor(tedious: typeof import("tedious"), config: ConnectionConfiguration) {
+    this.tedious = tedious;
+    this.conn = new tedious.Connection(config);
   }
 
   connect(): Promise<void> {
@@ -74,7 +91,7 @@ class TediousConnection {
       const rows: Record<string, unknown>[] = [];
       let columns: string[] = [];
 
-      const request = new Request(sql, (err) => {
+      const request = new this.tedious.Request(sql, (err) => {
         if (err) reject(err);
         else resolve({ columns, rows });
       });
@@ -104,10 +121,14 @@ class TediousConnection {
 
 export class SqlServerConnector implements DatabaseConnector {
   private connections: Map<string, TediousConnection> = new Map();
+  private creatingConnections: Map<string, Promise<TediousConnection>> = new Map();
 
   private async getConnection(engineId: string, config: EngineConfig): Promise<TediousConnection> {
-    let conn = this.connections.get(engineId);
-    if (!conn) {
+    const cached = this.connections.get(engineId);
+    if (cached) return cached;
+    const inFlight = this.creatingConnections.get(engineId);
+    if (inFlight) return inFlight;
+    const creating = (async () => {
       const cfg = config.url
         ? parseSqlServerUrl(config.url)
         : {
@@ -118,7 +139,8 @@ export class SqlServerConnector implements DatabaseConnector {
             database: config.database || "",
           };
 
-      conn = new TediousConnection({
+      const tedious = await loadDriver();
+      const conn = new TediousConnection(tedious, {
         server: cfg.server,
         authentication: {
           type: "default",
@@ -137,10 +159,11 @@ export class SqlServerConnector implements DatabaseConnector {
 
       await conn.connect();
       this.connections.set(engineId, conn);
-    }
-    return conn;
+      return conn;
+    })().finally(() => this.creatingConnections.delete(engineId));
+    this.creatingConnections.set(engineId, creating);
+    return creating;
   }
-
   async listDatabases(engineId: string, config: EngineConfig): Promise<DatabaseInfo[]> {
     const conn = await this.getConnection(engineId, config);
     const { rows } = await conn.execSql(
