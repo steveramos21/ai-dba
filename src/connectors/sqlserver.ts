@@ -367,7 +367,10 @@ export class SqlServerConnector implements DatabaseConnector {
     const minDurationUs = Math.round(minDurationMs * 1000);
     const conn = await this.getConnection(engineId, config);
     try {
-      // SQL Server: sys.dm_exec_query_stats — total_elapsed_time is in microseconds
+      // SQL Server: sys.dm_exec_query_stats — total_elapsed_time is in microseconds.
+      // v2 fix: db_name comes from dm_exec_sql_text.dbid — dm_exec_query_stats
+      // has no database_id column (Msg 207, live-proven 2026-09-26; the old
+      // blanket catch had been masking this since sprint 8).
       const { rows } = await conn.execSql(
         `SELECT TOP ${limit}
           qs.sql_handle          AS sql_handle,
@@ -379,7 +382,7 @@ export class SqlServerConnector implements DatabaseConnector {
           qs.total_rows           AS rows_returned,
           qs.total_logical_reads  AS logical_reads,
           st.text                 AS query_text,
-          DB_NAME(qs.database_id) AS db_name
+          DB_NAME(st.dbid)        AS db_name
         FROM sys.dm_exec_query_stats qs
         CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
         WHERE qs.total_elapsed_time >= ${minDurationUs}

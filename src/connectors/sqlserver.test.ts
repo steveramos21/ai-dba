@@ -163,3 +163,23 @@ describe("SqlServerConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () =>
     await expect(connector.listSlowQueries("deg-engine", config)).rejects.toThrow(/Invalid column name/);
   });
 });
+
+describe("SqlServerConnector — slow-queries SQL source column (v2 fix)", () => {
+  it("reads db_name from dm_exec_sql_text.dbid, never qs.database_id (Msg 207 regression guard)", async () => {
+    // The v1 AFTER run exposed this live: sys.dm_exec_query_stats has no
+    // database_id column (Msg 207). db_name's source is st.dbid from the
+    // dm_exec_sql_text CROSS APPLY. This pins the fixed SQL text so the
+    // broken column cannot come back.
+    const connector = new SqlServerConnector();
+    const conn = { execSql: vi.fn().mockResolvedValue({ columns: [], rows: [] }), close: vi.fn() };
+    // @ts-expect-error - we're mocking the private connection cache
+    connector.connections.set("sql-src", conn);
+    const config: EngineConfig = { type: "sqlserver", url: "sqlserver://sa:x@localhost:1433/db" };
+
+    await connector.listSlowQueries("sql-src", config);
+
+    const sql = conn.execSql.mock.calls[0][0] as string;
+    expect(sql).toContain("DB_NAME(st.dbid)");
+    expect(sql).not.toContain("qs.database_id");
+  });
+});
