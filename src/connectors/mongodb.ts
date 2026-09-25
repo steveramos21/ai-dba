@@ -14,6 +14,7 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  SlowQueryResult,
   KillResult,
   ReplicationStatus,
   ServerVariable,
@@ -250,7 +251,7 @@ export class MongoDbConnector implements DatabaseConnector {
     return { plan: JSON.stringify(result, null, 2), format: "json", analyzed: analyze };
   }
 
-  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
     const minDurationSec = minDurationMs / 1000;
@@ -259,17 +260,30 @@ export class MongoDbConnector implements DatabaseConnector {
     try {
       const result = await admin.command({ currentOp: 1, $ownOps: false, secs_running: { $gte: minDurationSec } });
       const ops = (result.inprog || []).slice(0, limit);
-      return ops.map((op: any, i: number) => ({
+      return { queries: ops.map((op: any, i: number) => ({
         id: `mongo-${op.opid ?? i}`,
         query: op.command ? JSON.stringify(op.command).substring(0, 2000) : "",
         database: op.ns ?? undefined,
         totalExecutionTimeMs: Math.round((op.secs_running || 0) * 1000),
         executionCount: undefined,
         maxExecutionTimeMs: undefined,
-      }));
-    } catch {
-      // currentOp may require privileges — return empty
-      return [];
+      })) };
+    } catch (e: any) {
+      // currentOp requires clusterMonitor privileges — a denial is "couldn't
+      // read the source" (empty + degraded), never a silent empty.
+      // Whitelist-only: Unauthorized (code 13) and "not authorized" text.
+      // Anything else rethrows and surfaces as an error.
+      const msg = String(e?.message ?? "");
+      const code = (e as { code?: unknown })?.code;
+      if (code === 13 || /not authorized|unauthorized|requires authentication/i.test(msg)) {
+        return {
+          queries: [],
+          degraded: {
+            reason: `currentOp unavailable (requires clusterMonitor privileges): ${msg}`,
+          },
+        };
+      }
+      throw e;
     }
   }
 

@@ -13,6 +13,7 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  SlowQueryResult,
   KillResult,
   ReplicationStatus,
   ServerVariable,
@@ -361,7 +362,7 @@ export class OracleConnector implements DatabaseConnector {
     }
   }
 
-  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
     const minDurationUs = minDurationMs * 1000;
@@ -388,7 +389,7 @@ export class OracleConnector implements DatabaseConnector {
         [minDurationUs, limit]
       );
       const rows = result.rows || [];
-      return rows.map((row: any) => ({
+      return { queries: rows.map((row: any) => ({
         id: `oracle-${row[0]}`,
         query: (row[1] ?? "").substring(0, 2000),
         executionCount: Number(row[2]) || undefined,
@@ -396,11 +397,21 @@ export class OracleConnector implements DatabaseConnector {
         avgExecutionTimeMs: row[4] ? Math.round(Number(row[4]) / 1000) : undefined,
         maxExecutionTimeMs: row[5] != null ? Math.round(Number(row[5]) / 1000) : undefined,
         rowsReturned: Number(row[8]) || undefined,
-      }));
+      })) };
     } catch (e: any) {
-      // V$SQLAREA requires SELECT ANY DICTIONARY — return empty if no permission
-      if (e.message?.includes("ORA-00942") || e.message?.includes("ORA-01031")) {
-        return [];
+      // V$SQLAREA requires SELECT ANY DICTIONARY — a denial is "couldn't read
+      // the source" (empty + degraded), never a silent empty. Whitelist-only:
+      // ORA-00942 (view does not exist) and ORA-01031 (insufficient
+      // privileges). ORA-00904 (invalid identifier - wrong column) is NOT
+      // whitelisted: it must rethrow and surface as an error.
+      const msg = String(e?.message ?? "");
+      if (msg.includes("ORA-00942") || msg.includes("ORA-01031")) {
+        return {
+          queries: [],
+          degraded: {
+            reason: `v$sqlarea unavailable (requires SELECT ANY DICTIONARY): ${msg}`,
+          },
+        };
       }
       throw e;
     } finally {

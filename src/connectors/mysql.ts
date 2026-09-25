@@ -23,6 +23,7 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  SlowQueryResult,
   KillResult,
   ReplicationStatus,
   ServerVariable,
@@ -274,7 +275,7 @@ export class MySQLConnector implements DatabaseConnector {
     }
   }
 
-  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
     const pool = await this.getPool(engineId, config);
@@ -301,7 +302,7 @@ export class MySQLConnector implements DatabaseConnector {
         LIMIT ?`,
         [minDurationMs, limit]
       );
-      return rows.map((row: any, i: number) => ({
+      return { queries: rows.map((row: any, i: number) => ({
         id: `mysql-${i}`,
         query: row.digest_text ?? "",
         database: row.schema_name ?? undefined,
@@ -313,11 +314,31 @@ export class MySQLConnector implements DatabaseConnector {
         rowsReturned: Number(row.rows_returned) || undefined,
         firstSeen: row.first_seen ? String(row.first_seen) : undefined,
         lastSeen: row.last_seen ? String(row.last_seen) : undefined,
-      }));
+      })) };
     } catch (e: any) {
-      // performance_schema may be disabled or not accessible
-      if (e.message?.includes("performance_schema") || e.code === "ER_ACCESS_DENIED") {
-        return [];
+      // performance_schema may be disabled or not accessible — that is a
+      // "couldn't read the source" case (empty + degraded), never a silent
+      // empty. Whitelist-only: a disabled/absent schema is recognized by the
+      // message, a denial by the real mysql2 error codes. Anything else —
+      // e.g. a wrong column raising ER_BAD_FIELD_ERROR — must rethrow and
+      // surface as an error.
+      const msg = String(e?.message ?? "");
+      const code = String(e?.code ?? "");
+      const deniedCodes = [
+        "ER_ACCESS_DENIED",
+        "ER_ACCESS_DENIED_ERROR",
+        "ER_DBACCESS_DENIED_ERROR",
+        "ER_TABLEACCESS_DENIED_ERROR",
+        "ER_COLUMNACCESS_DENIED_ERROR",
+        "ER_SPECIFIC_ACCESS_DENIED_ERROR",
+      ];
+      if (/performance_schema/i.test(msg) || deniedCodes.includes(code)) {
+        return {
+          queries: [],
+          degraded: {
+            reason: `performance_schema.events_statements_summary_by_digest unavailable (disabled or access denied): ${msg}`,
+          },
+        };
       }
       throw e;
     } finally {

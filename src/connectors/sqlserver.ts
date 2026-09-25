@@ -14,6 +14,7 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  SlowQueryResult,
   KillResult,
   ReplicationStatus,
   ServerVariable,
@@ -360,7 +361,7 @@ export class SqlServerConnector implements DatabaseConnector {
     }
   }
 
-  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
     const minDurationUs = Math.round(minDurationMs * 1000);
@@ -384,7 +385,7 @@ export class SqlServerConnector implements DatabaseConnector {
         WHERE qs.total_elapsed_time >= ${minDurationUs}
         ORDER BY qs.total_elapsed_time DESC`
       );
-      return rows.map((row: any, i: number) => ({
+      return { queries: rows.map((row: any, i: number) => ({
         id: `sqlserver-${i}`,
         query: (row.query_text ?? "").substring(0, 2000),
         database: row.db_name ?? undefined,
@@ -393,10 +394,23 @@ export class SqlServerConnector implements DatabaseConnector {
         avgExecutionTimeMs: row.avg_time_us != null ? Math.round(Number(row.avg_time_us) / 1000) : undefined,
         maxExecutionTimeMs: Math.round(Number(row.max_time_us) / 1000),
         rowsReturned: Number(row.rows_returned) || undefined,
-      }));
-    } catch {
-      // sys.dm_exec_query_stats requires VIEW SERVER STATE — return empty if denied
-      return [];
+      })) };
+    } catch (e: any) {
+      // sys.dm_exec_query_stats requires VIEW SERVER STATE — a denial is a
+      // "couldn't read the source" case (empty + degraded), never a silent
+      // empty. Whitelist-only: permission-denied phrases. Anything else —
+      // e.g. "Invalid column name" from a wrong column — must rethrow and
+      // surface as an error (the ORA-00904-class guard).
+      const msg = String(e?.message ?? "");
+      if (/permission was denied|permission denied|does not have permission|VIEW SERVER STATE/i.test(msg)) {
+        return {
+          queries: [],
+          degraded: {
+            reason: `sys.dm_exec_query_stats unavailable (requires VIEW SERVER STATE): ${msg}`,
+          },
+        };
+      }
+      throw e;
     }
   }
 

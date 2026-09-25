@@ -274,3 +274,42 @@ describe("MySQLConnector — timeouts (Task 1.3)", () => {
     expect(mockConnection.destroy).toHaveBeenCalled();
   });
 });
+
+describe("MySQLConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
+  function setup(engineId: string, err: unknown) {
+    const connector = new MySQLConnector();
+    const mockConnection = {
+      query: vi.fn().mockRejectedValue(err),
+      release: vi.fn(),
+    };
+    const pool = { getConnection: vi.fn().mockResolvedValue(mockConnection), end: vi.fn() };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set(engineId, pool);
+    const config: EngineConfig = { type: "mysql", url: "mysql://root@localhost/db" };
+    return { connector, config };
+  }
+
+  it("returns empty queries + degraded reason when performance_schema is denied", async () => {
+    const denied = Object.assign(
+      new Error("SELECT command denied to user 'app'@'%' for table 'events_statements_summary_by_digest'"),
+      { code: "ER_TABLEACCESS_DENIED_ERROR" }
+    );
+    const { connector, config } = setup("deg-engine", denied);
+
+    const result = await connector.listSlowQueries("deg-engine", config);
+
+    // Never a bare array, never a silent empty.
+    expect(Array.isArray(result)).toBe(false);
+    expect(result.queries).toEqual([]);
+    expect(result.degraded?.reason).toContain("denied to user");
+  });
+
+  it("rethrows a wrong-column error instead of collapsing it into empty+degraded (Q8 guard)", async () => {
+    const wrongColumn = Object.assign(new Error("Unknown column 'DIGEST_TEXT_XX' in 'field list'"), {
+      code: "ER_BAD_FIELD_ERROR",
+    });
+    const { connector, config } = setup("deg-engine", wrongColumn);
+
+    await expect(connector.listSlowQueries("deg-engine", config)).rejects.toThrow(/Unknown column/);
+  });
+});

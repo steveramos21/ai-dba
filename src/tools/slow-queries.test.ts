@@ -21,10 +21,12 @@ describe("slow-queries tool", () => {
   it("returns slow queries as JSON on happy path", async () => {
     const { server, handlers } = mockServer();
     const conn = {
-      listSlowQueries: vi.fn().mockResolvedValue([
-        { id: "mysql-0", query: "SELECT * FROM orders", totalExecutionTimeMs: 5000, executionCount: 100 },
-        { id: "mysql-1", query: "SELECT * FROM users WHERE id = 1", totalExecutionTimeMs: 3000, executionCount: 50 },
-      ]),
+      listSlowQueries: vi.fn().mockResolvedValue({
+        queries: [
+          { id: "mysql-0", query: "SELECT * FROM orders", totalExecutionTimeMs: 5000, executionCount: 100 },
+          { id: "mysql-1", query: "SELECT * FROM users WHERE id = 1", totalExecutionTimeMs: 3000, executionCount: 50 },
+        ],
+      }),
     };
     registerSlowQueriesTool(server, config, { mysql: conn as any, postgres: conn as any });
 
@@ -34,11 +36,12 @@ describe("slow-queries tool", () => {
     expect(body.slowQueries[0].query).toBe("SELECT * FROM orders");
     expect(body.slowQueries[0].totalExecutionTimeMs).toBe(5000);
     expect(body.count).toBe(2);
+    expect(body.degraded).toBeUndefined();
   });
 
   it("passes limit and minDurationMs options to connector", async () => {
     const { server, handlers } = mockServer();
-    const conn = { listSlowQueries: vi.fn().mockResolvedValue([]) };
+    const conn = { listSlowQueries: vi.fn().mockResolvedValue({ queries: [] }) };
     registerSlowQueriesTool(server, config, { mysql: conn as any, postgres: conn as any });
 
     await handlers["slow-queries"]({ engineId: "pg-test", limit: 5, minDurationMs: 500 });
@@ -62,5 +65,20 @@ describe("slow-queries tool", () => {
     const res = await handlers["slow-queries"]({ engineId: "mysql-test" });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain("Connection refused");
+  });
+
+  it("carries the degraded reason through instead of a silent empty (Q8 guard)", async () => {
+    const { server, handlers } = mockServer();
+    const reason = "pg_stat_statements unavailable (extension not installed or not readable): relation \"pg_stat_statements\" does not exist";
+    const conn = { listSlowQueries: vi.fn().mockResolvedValue({ queries: [], degraded: { reason } }) };
+    registerSlowQueriesTool(server, config, { mysql: conn as any, postgres: conn as any });
+
+    const res = await handlers["slow-queries"]({ engineId: "pg-test" });
+    expect(res.isError).toBeUndefined();
+    const body = JSON.parse(res.content[0].text);
+    // If degraded were silently dropped, these assertions fail — the false-pass guard.
+    expect(body.degraded.reason).toBe(reason);
+    expect(body.count).toBe(0);
+    expect(body.slowQueries).toEqual([]);
   });
 });

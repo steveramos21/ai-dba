@@ -132,3 +132,33 @@ describe("MongoDbConnector — timeouts (Task 1.3)", () => {
     expect(find).toHaveBeenCalledWith({}, { maxTimeMS: 25 });
   });
 });
+
+describe("MongoDbConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
+  function setup(engineId: string, err: unknown) {
+    const command = vi.fn().mockRejectedValue(err);
+    const client = { db: vi.fn().mockReturnValue({ admin: () => ({ command }) }) };
+    const connector = new MongoDbConnector();
+    // @ts-expect-error - we're mocking the private client cache
+    connector.clients.set(engineId, client);
+    const config: EngineConfig = { type: "mongodb", url: "mongodb://u:***@localhost:27017/db" };
+    return { connector, config };
+  }
+
+  it("returns empty queries + degraded reason when currentOp is unauthorized (code 13)", async () => {
+    const denied = Object.assign(new Error("not authorized on admin to execute command { currentOp: 1 }"), { code: 13 });
+    const { connector, config } = setup("deg-mongo", denied);
+
+    const result = await connector.listSlowQueries("deg-mongo", config);
+
+    expect(Array.isArray(result)).toBe(false);
+    expect(result.queries).toEqual([]);
+    expect(result.degraded?.reason).toMatch(/clusterMonitor/);
+  });
+
+  it("rethrows a generic currentOp failure instead of collapsing it into empty+degraded (Q8 guard)", async () => {
+    const transport = new Error("connection reset by peer");
+    const { connector, config } = setup("deg-mongo", transport);
+
+    await expect(connector.listSlowQueries("deg-mongo", config)).rejects.toThrow(/connection reset by peer/);
+  });
+});

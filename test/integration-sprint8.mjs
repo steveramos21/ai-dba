@@ -72,9 +72,13 @@ async function testExplain(engineId, engineConfig, connector) {
 async function testSlowQueries(engineId, engineConfig, connector) {
   const label = `[${engineId}] slow-queries`;
   try {
-    const queries = await connector.listSlowQueries(engineId, engineConfig, { limit: 5, minDurationMs: 0 });
-    assert(`${label} returns array`, Array.isArray(queries), `got: ${typeof queries}`);
+    const result = await connector.listSlowQueries(engineId, engineConfig, { limit: 5, minDurationMs: 0 });
+    // Task 1.4 contract: { queries, degraded? } — never a bare array.
+    assert(`${label} returns result object (not array)`, !Array.isArray(result) && result !== null && typeof result === 'object', `got: ${Array.isArray(result) ? 'array' : typeof result}`);
+    assert(`${label} has queries array`, Array.isArray(result.queries), `got: ${typeof result.queries}`);
+    assert(`${label} degraded absent or reason string`, result.degraded === undefined || (typeof result.degraded.reason === 'string' && result.degraded.reason.length > 0), `got: ${JSON.stringify(result.degraded)}`);
 
+    const queries = result.queries;
     // MySQL and SQL Server should have data; PG/Oracle/Mongo may be empty (graceful degradation)
     if (queries.length > 0) {
       const q = queries[0];
@@ -119,7 +123,7 @@ async function testHealthCheck(engineId, engineConfig, connector) {
     // 4. Slow queries
     try {
       const sq = await connector.listSlowQueries(engineId, engineConfig, { limit: 5, minDurationMs: 1000 });
-      assert(`${label} slow-queries returns array`, Array.isArray(sq));
+      assert(`${label} slow-queries returns result object`, !Array.isArray(sq) && Array.isArray(sq.queries));
     } catch (e) { assert(`${label} slow-queries check`, false, e.message); }
   } catch (e) { assert(`${label}`, false, e.message); }
 }

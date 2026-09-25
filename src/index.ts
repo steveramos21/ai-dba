@@ -536,12 +536,16 @@ program
   .action(async (engineId: string, options: { limit: string; minDurationMs: string }) => {
     const { engine, connector, connectors } = await resolveEngine(engineId);
     try {
-      const queries = await connector.listSlowQueries(engineId, engine, {
+      const result = await connector.listSlowQueries(engineId, engine, {
         limit: parseInt(options.limit, 10),
         minDurationMs: parseInt(options.minDurationMs, 10),
       });
+      const queries = result.queries;
+      if (result.degraded) {
+        console.log(chalk.yellow(`Slow-query source unreadable (degraded): ${result.degraded.reason}`));
+      }
       if (queries.length === 0) {
-        console.log(chalk.yellow("No slow queries found (or feature unavailable for this engine)."));
+        if (!result.degraded) console.log(chalk.yellow("No slow queries found."));
       } else {
         const table = new Table({
           head: [chalk.white("Query"), chalk.white("Execs"), chalk.white("Total"), chalk.white("Avg"), chalk.white("Max"), chalk.white("Rows")],
@@ -616,13 +620,17 @@ program
 
       // 4. Slow queries
       try {
-        const slowQueries = await connector.listSlowQueries(engineId, engine, { limit: 5, minDurationMs: 1000 });
-        checks.push({
-          name: "slow-queries",
-          status: slowQueries.length === 0 ? "pass" : "warn",
-          message: slowQueries.length === 0 ? "No slow queries detected" : `${slowQueries.length} slow query pattern(s) found`,
-          value: slowQueries.length,
-        });
+        const result = await connector.listSlowQueries(engineId, engine, { limit: 5, minDurationMs: 1000 });
+        checks.push(
+          result.degraded
+            ? { name: "slow-queries", status: "skip", message: `Could not read the slow-query source: ${result.degraded.reason}` }
+            : {
+                name: "slow-queries",
+                status: result.queries.length === 0 ? "pass" : "warn",
+                message: result.queries.length === 0 ? "No slow queries detected" : `${result.queries.length} slow query pattern(s) found`,
+                value: result.queries.length,
+              }
+        );
       } catch (e: any) {
         checks.push({ name: "slow-queries", status: "skip", message: e instanceof Error ? e.message : String(e) });
       }
@@ -1098,9 +1106,13 @@ async function startRepl(
           if (args[i] === "--min-ms" && args[i + 1]) minDurationMs = parseInt(args[i + 1], 10);
         }
         try {
-          const queries = await connector.listSlowQueries(currentEngine, engine, { limit, minDurationMs });
+          const result = await connector.listSlowQueries(currentEngine, engine, { limit, minDurationMs });
+          const queries = result.queries;
+          if (result.degraded) {
+            console.log(chalk.yellow(`Slow-query source unreadable (degraded): ${result.degraded.reason}`));
+          }
           if (queries.length === 0) {
-            console.log(chalk.yellow("No slow queries found (or feature unavailable for this engine)."));
+            if (!result.degraded) console.log(chalk.yellow("No slow queries found."));
           } else {
             const table = new Table({
               head: [chalk.white("Query"), chalk.white("Execs"), chalk.white("Total"), chalk.white("Avg"), chalk.white("Max"), chalk.white("Rows")],
@@ -1173,13 +1185,17 @@ async function startRepl(
 
         // 4. Slow queries
         try {
-          const slowQueries = await connector.listSlowQueries(currentEngine, engine, { limit: 5, minDurationMs: 1000 });
-          checks.push({
-            name: "slow-queries",
-            status: slowQueries.length === 0 ? "pass" : "warn",
-            message: slowQueries.length === 0 ? "No slow queries detected" : `${slowQueries.length} slow query pattern(s) found`,
-            value: slowQueries.length,
-          });
+          const result = await connector.listSlowQueries(currentEngine, engine, { limit: 5, minDurationMs: 1000 });
+          checks.push(
+            result.degraded
+              ? { name: "slow-queries", status: "skip", message: `Could not read the slow-query source: ${result.degraded.reason}` }
+              : {
+                  name: "slow-queries",
+                  status: result.queries.length === 0 ? "pass" : "warn",
+                  message: result.queries.length === 0 ? "No slow queries detected" : `${result.queries.length} slow query pattern(s) found`,
+                  value: result.queries.length,
+                }
+          );
         } catch (e: any) {
           checks.push({ name: "slow-queries", status: "skip", message: e instanceof Error ? e.message : String(e) });
         }

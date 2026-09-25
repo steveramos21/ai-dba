@@ -130,3 +130,36 @@ describe("SqlServerConnector — timeouts (Task 1.3)", () => {
     expect(connectionCtorMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("SqlServerConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
+  function setup(engineId: string, err: unknown) {
+    const connector = new SqlServerConnector();
+    const conn = { execSql: vi.fn().mockRejectedValue(err), close: vi.fn() };
+    // @ts-expect-error - we're mocking the private connection cache
+    connector.connections.set(engineId, conn);
+    const config: EngineConfig = { type: "sqlserver", url: "sqlserver://sa:x@localhost:1433/db" };
+    return { connector, config };
+  }
+
+  it("returns empty queries + degraded reason when VIEW SERVER STATE is denied", async () => {
+    const denied = new Error(
+      "The SELECT permission was denied on the object 'dm_exec_query_stats', database 'mssqlsystemresource', schema 'sys'."
+    );
+    const { connector, config } = setup("deg-engine", denied);
+
+    const result = await connector.listSlowQueries("deg-engine", config);
+
+    expect(Array.isArray(result)).toBe(false);
+    expect(result.queries).toEqual([]);
+    expect(result.degraded?.reason).toMatch(/VIEW SERVER STATE/);
+  });
+
+  it("rethrows invalid-column errors instead of the old blanket catch (Q8 guard)", async () => {
+    // The old code was a bare `catch {}` that swallowed EVERYTHING,
+    // including this ORA-00904-class error.
+    const bad = new Error("Invalid column name 'qs'.");
+    const { connector, config } = setup("deg-engine", bad);
+
+    await expect(connector.listSlowQueries("deg-engine", config)).rejects.toThrow(/Invalid column name/);
+  });
+});

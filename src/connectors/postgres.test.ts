@@ -265,3 +265,40 @@ describe("PostgreSQLConnector — timeouts (Task 1.3)", () => {
     expect(client.release).toHaveBeenCalledWith(true);
   });
 });
+
+describe("PostgreSQLConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
+  function setup(engineId: string, err: unknown) {
+    const connector = new PostgreSQLConnector();
+    const client = { query: vi.fn().mockRejectedValue(err), release: vi.fn() };
+    const pool = { connect: vi.fn().mockResolvedValue(client), end: vi.fn() };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set(engineId, pool);
+    const config: EngineConfig = { type: "postgres", url: "postgresql://postgres@localhost:5432/testdb" };
+    return { connector, config };
+  }
+
+  it("returns empty queries + degraded reason when pg_stat_statements is missing (42P01) — the AFTER harness contract", async () => {
+    const missing = Object.assign(new Error('relation "pg_stat_statements" does not exist'), { code: "42P01" });
+    const { connector, config } = setup("pg-degraded", missing);
+
+    // Mirrors the staged AFTER harness call exactly.
+    const result = await connector.listSlowQueries("pg-degraded", config, { limit: 5, minDurationMs: 0 });
+
+    expect(Array.isArray(result)).toBe(false);
+    expect(Array.isArray(result.queries)).toBe(true);
+    expect(result.queries).toEqual([]);
+    expect(result.degraded?.reason).toBeTruthy();
+    expect(result.degraded!.reason).toContain("pg_stat_statements");
+  });
+
+  it("rethrows a wrong-column error (42703) instead of swallowing it as degraded (Q8 guard)", async () => {
+    // The old predicate matched /does not exist/ in the message and swallowed
+    // this class of error. Codes are now whitelisted (42P01/42501) and 42703
+    // must surface as an error.
+    const wrongColumn = Object.assign(new Error('column "total_exec_time_xx" does not exist'), { code: "42703" });
+    const { connector, config } = setup("pg-degraded", wrongColumn);
+
+    await expect(connector.listSlowQueries("pg-degraded", config, { limit: 5, minDurationMs: 0 }))
+      .rejects.toThrow(/total_exec_time_xx/);
+  });
+});

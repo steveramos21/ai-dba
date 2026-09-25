@@ -128,3 +128,33 @@ describe("OracleConnector — timeouts (Task 1.3)", () => {
     expect(fakeConn.close).toHaveBeenCalledWith({ drop: true });
   });
 });
+
+describe("OracleConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
+  function setup(engineId: string, err: unknown) {
+    const connector = new OracleConnector();
+    const fakeConn = { execute: vi.fn().mockRejectedValue(err), close: vi.fn() };
+    const fakePool = { getConnection: vi.fn().mockResolvedValue(fakeConn) };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set(engineId, fakePool);
+    const config: EngineConfig = { type: "oracle", url: "oracle://u:p@localhost:1521/XE" };
+    return { connector, config };
+  }
+
+  it("returns empty queries + degraded reason when v$ access is denied (ORA-00942)", async () => {
+    const denied = new Error("ORA-00942: table or view does not exist");
+    const { connector, config } = setup("deg-oracle", denied);
+
+    const result = await connector.listSlowQueries("deg-oracle", config);
+
+    expect(Array.isArray(result)).toBe(false);
+    expect(result.queries).toEqual([]);
+    expect(result.degraded?.reason).toContain("ORA-00942");
+  });
+
+  it("rethrows ORA-00904 wrong-column errors (Q8 guard — the ORA-00904 case named in the plan)", async () => {
+    const wrongColumn = new Error('ORA-00904: "ELAPSED_TIME_XX": invalid identifier');
+    const { connector, config } = setup("deg-oracle", wrongColumn);
+
+    await expect(connector.listSlowQueries("deg-oracle", config)).rejects.toThrow(/ORA-00904/);
+  });
+});

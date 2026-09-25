@@ -98,15 +98,23 @@ export function registerHealthCheckTool(
 
       // 4. Slow queries — reuse existing method
       try {
-        const slowQueries = await connector.listSlowQueries(engineId, engine, { limit: 5, minDurationMs: 1000 });
-        if (slowQueries.length === 0) {
+        const result = await connector.listSlowQueries(engineId, engine, { limit: 5, minDurationMs: 1000 });
+        if (result.degraded) {
+          // Couldn't read the source (missing extension / privileges) — skip
+          // with the real reason instead of passing over an empty list.
+          checks.push({
+            name: "slow-queries",
+            status: "skip",
+            message: `Could not read the slow-query source: ${result.degraded.reason}`,
+          });
+        } else if (result.queries.length === 0) {
           checks.push({ name: "slow-queries", status: "pass", message: "No slow queries detected", value: 0 });
         } else {
           checks.push({
             name: "slow-queries",
             status: "warn",
-            message: `${slowQueries.length} slow query pattern(s) found`,
-            value: slowQueries.length,
+            message: `${result.queries.length} slow query pattern(s) found`,
+            value: result.queries.length,
           });
         }
       } catch (e: any) {

@@ -14,6 +14,7 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  SlowQueryResult,
   KillResult,
   ReplicationStatus,
   ServerVariable,
@@ -310,7 +311,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
     }
   }
 
-  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
     const pool = await this.getPool(engineId, config);
@@ -333,7 +334,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
         LIMIT $2`,
         [minDurationMs, limit]
       );
-      return res.rows.map((row: any) => ({
+      return { queries: res.rows.map((row: any) => ({
         id: `pg-${row.query_id}`,
         query: row.query_text ?? "",
         executionCount: Number(row.exec_count),
@@ -341,13 +342,22 @@ export class PostgreSQLConnector implements DatabaseConnector {
         avgExecutionTimeMs: Math.round(Number(row.avg_time_ms)),
         maxExecutionTimeMs: Math.round(Number(row.max_time_ms)),
         rowsReturned: Number(row.rows_returned) || undefined,
-      }));
+      })) };
     } catch (e: any) {
-      // Extension not installed or permission denied — return empty
-      if (e.message?.includes("pg_stat_statements") ||
-          e.message?.includes("does not exist") ||
-          e.code === "42501" || e.code === "42P01") {
-        return [];
+      // Extension not installed or not readable — "couldn't read" (empty +
+      // degraded), never a silent empty. Whitelist-only: 42P01 (missing
+      // relation), 42501 (privilege denied), or an extension-load failure
+      // named in the message. Deliberately NOT a generic "does not exist"
+      // match: a wrong-column error (42703 — the ORA-00904 class) must
+      // rethrow and surface as an error.
+      const msg = String(e?.message ?? "");
+      if (e.code === "42P01" || e.code === "42501" || /pg_stat_statements/i.test(msg)) {
+        return {
+          queries: [],
+          degraded: {
+            reason: `pg_stat_statements unavailable (extension not installed or not readable): ${msg}`,
+          },
+        };
       }
       throw e;
     } finally {

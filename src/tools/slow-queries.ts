@@ -20,7 +20,7 @@ export function registerSlowQueriesTool(
     "SQL Server uses sys.dm_exec_query_stats (requires VIEW SERVER STATE); " +
     "Oracle uses v$sqlarea (requires SELECT ANY DICTIONARY); " +
     "MongoDB uses currentOp (shows currently running ops, not historical). " +
-    "Returns empty array if the feature is unavailable or insufficient privileges.",
+    "Returns an empty list with a degraded reason when the source cannot be read (missing extension or insufficient privileges).",
     {
       engineId: z.string().describe(
         "Engine identifier from config.yaml (e.g., 'mysql-primary')"
@@ -61,16 +61,27 @@ export function registerSlowQueriesTool(
       }
 
       try {
-        const queries = await connector.listSlowQueries(engineId, engine, {
+        const result = await connector.listSlowQueries(engineId, engine, {
           limit: limit ?? 10,
           minDurationMs: minDurationMs ?? 1000,
         });
 
+        // Task 1.4: never a silent empty — carry the degraded reason through
+        // so callers can tell "couldn't read the source" from "read fine,
+        // nothing found". Degraded is data-quality, not a transport error.
         return {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify({ slowQueries: queries, count: queries.length }, null, 2),
+              text: JSON.stringify(
+                {
+                  slowQueries: result.queries,
+                  count: result.queries.length,
+                  ...(result.degraded ? { degraded: result.degraded } : {}),
+                },
+                null,
+                2
+              ),
             },
           ],
         };
