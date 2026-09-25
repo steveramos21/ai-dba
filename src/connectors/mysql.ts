@@ -1,5 +1,6 @@
 import type { Pool, RowDataPacket } from "mysql2/promise";
-import { resolveMysqlConfig } from "../config.js";
+import { resolveMysqlConfig, resolveRowLimit } from "../config.js";
+import { applyRowCap, rewriteWithLimit } from "../truncate.js";
 import type { EngineConfig } from "../config.js";
 import type {
   DatabaseConnector,
@@ -324,10 +325,17 @@ export class MySQLConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, SHOW, EXPLAIN, DESCRIBE, DESC) are allowed for now.");
     }
 
+    const cap = resolveRowLimit(config);
+    // Sprint 10 Part 2a — row cap. Server-side LIMIT n+1 only when provably
+    // safe (see src/truncate.ts); on any doubt the statement runs as written
+    // and the client-side slice below enforces the cap with the same honest
+    // flag. A rewrite must never turn a working query into a failing one.
+    const effectiveSql = rewriteWithLimit(sql, cap + 1) ?? sql;
+
     const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
-      const [rows, fields] = await connection.query<RowDataPacket[]>(sql);
+      const [rows, fields] = await connection.query<RowDataPacket[]>(effectiveSql);
       const columns = fields.map((f) => f.name);
       const rowRecords = (rows as any[]).map((row) => {
         const record: Record<string, unknown> = {};
@@ -336,7 +344,14 @@ export class MySQLConnector implements DatabaseConnector {
         }
         return record;
       });
-      return { columns, rows: rowRecords };
+      const capped = applyRowCap(rowRecords, cap);
+      return {
+        columns,
+        rows: capped.rows,
+        // Only surfaced when rows were actually dropped ("no flag" otherwise).
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     } finally {
       connection.release();
     }

@@ -20,6 +20,8 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+import { resolveRowLimit } from "../config.js";
+import { applyRowCap, rewriteWithLimit } from "../truncate.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
 // startup free of driver cost. Guarded by npm run test:coldstart.
@@ -355,10 +357,17 @@ export class PostgreSQLConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, SHOW, EXPLAIN, DESCRIBE, DESC) are allowed for now.");
     }
 
+    const cap = resolveRowLimit(config);
+    // Sprint 10 Part 2a — row cap. Server-side LIMIT n+1 only when provably
+    // safe (see src/truncate.ts); on any doubt the statement runs as written
+    // and the client-side slice below enforces the cap with the same honest
+    // flag. A rewrite must never turn a working query into a failing one.
+    const effectiveSql = rewriteWithLimit(sql, cap + 1) ?? sql;
+
     const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
     try {
-      const res = await client.query(sql);
+      const res = await client.query(effectiveSql);
       const columns = res.fields.map((f) => f.name);
       const rowRecords = res.rows.map((row: any) => {
         const record: Record<string, unknown> = {};
@@ -367,7 +376,14 @@ export class PostgreSQLConnector implements DatabaseConnector {
         }
         return record;
       });
-      return { columns, rows: rowRecords };
+      const capped = applyRowCap(rowRecords, cap);
+      return {
+        columns,
+        rows: capped.rows,
+        // Only surfaced when rows were actually dropped ("no flag" otherwise).
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     } finally {
       client.release();
     }

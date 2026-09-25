@@ -55,6 +55,10 @@ export interface QueryResult {
   columns: string[];
   rows: Record<string, unknown>[];
   affectedRows?: number;
+  /** True when the result was capped at the engine's rowLimit. */
+  truncated?: boolean;
+  /** The cap that applied (default 1000). */
+  rowCap?: number;
 }
 
 export interface TableSizeInfo {

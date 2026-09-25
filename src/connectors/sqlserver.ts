@@ -20,6 +20,8 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+import { resolveRowLimit } from "../config.js";
+import { applyRowCap, rewriteWithTop } from "../truncate.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
 // startup free of driver cost. Guarded by npm run test:coldstart.
@@ -406,9 +408,23 @@ export class SqlServerConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, EXPLAIN, DESCRIBE, DESC) are allowed for now.");
     }
 
+    const cap = resolveRowLimit(config);
+    // Sprint 10 Part 2a — row cap. Server-side TOP (n+1) only when provably
+    // safe (see src/truncate.ts); on any doubt the statement runs as written
+    // and the client-side slice below enforces the cap with the same honest
+    // flag. A rewrite must never turn a working query into a failing one.
+    const effectiveSql = rewriteWithTop(sql, cap + 1) ?? sql;
+
     const conn = await this.getConnection(engineId, config);
-    const { columns, rows } = await conn.execSql(sql);
-    return { columns, rows };
+    const { columns, rows } = await conn.execSql(effectiveSql);
+    const capped = applyRowCap(rows, cap);
+    return {
+      columns,
+      rows: capped.rows,
+      // Only surfaced when rows were actually dropped ("no flag" otherwise).
+      truncated: capped.truncated || undefined,
+      rowCap: capped.truncated ? capped.rowCap : undefined,
+    };
   }
 
   async getBlockingChains(engineId: string, config: EngineConfig): Promise<BlockingChain[]> {

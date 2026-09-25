@@ -162,3 +162,56 @@ describe("MySQLConnector — cold-start concurrency", () => {
     expect(createPoolMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("MySQLConnector — row cap (Task 1.2)", () => {
+  function setupCap(rows: Record<string, unknown>[]) {
+    const connector = new MySQLConnector();
+    const mockConnection = {
+      query: vi.fn().mockResolvedValue([rows, [{ name: "id" }]]),
+      release: vi.fn(),
+    };
+    const pool = {
+      getConnection: vi.fn().mockResolvedValue(mockConnection),
+      end: vi.fn(),
+    };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("cap-engine", pool);
+    const config: EngineConfig = { type: "mysql", url: "mysql://root@localhost/db", rowLimit: 2 };
+    return { connector, mockConnection, config };
+  }
+
+  it("rewrites a bare SELECT with LIMIT n+1 and flags truncation when the extra row arrives", async () => {
+    const { connector, mockConnection, config } = setupCap([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t");
+
+    const sql = mockConnection.query.mock.calls[0][0] as string;
+    expect(sql).toContain("SELECT * FROM t");
+    expect(sql).toContain("\nLIMIT 3");
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+    expect(result.rowCap).toBe(2);
+  });
+
+  it("does not flag truncation when rows are at or under the cap", async () => {
+    const { connector, config } = setupCap([{ id: 1 }, { id: 2 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t");
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBeUndefined();
+    expect(result.rowCap).toBeUndefined();
+  });
+
+  it("runs the statement as written and slices client-side when no rewrite is safe (SHOW)", async () => {
+    const { connector, mockConnection, config } = setupCap([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    const result = await connector.query("cap-engine", config, "SHOW TABLES");
+
+    const sql = mockConnection.query.mock.calls[0][0] as string;
+    expect(sql).toBe("SHOW TABLES");
+    expect(sql).not.toContain("LIMIT");
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+  });
+});

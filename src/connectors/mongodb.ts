@@ -20,6 +20,8 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+import { resolveRowLimit } from "../config.js";
+import { applyRowCap } from "../truncate.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
 // startup free of driver cost. Guarded by npm run test:coldstart.
@@ -283,14 +285,34 @@ export class MongoDbConnector implements DatabaseConnector {
       return { columns: ["ok"], rows: [{ ok: result.ok }] };
     }
 
+    // Sprint 10 Part 2a — row cap. MongoDB has no SQL-level rewrite: find gets
+    // a server-side limit(cap + 1) and aggregate a trailing $limit stage when
+    // the pipeline has no terminal write stage ($out/$merge); other allowed
+    // commands are sliced client-side. All paths carry the same honest
+    // truncated/rowCap contract as the SQL connectors.
+    const cap = resolveRowLimit(config);
+
     if (cmd.find) {
       const collection = String(cmd.find);
       const filter = (cmd.filter as Record<string, unknown>) || {};
-      const limit = Number(cmd.limit) || 100;
+      // An explicit caller limit at or below the cap is honoured as-is
+      // (bounded by the cap); otherwise fetch cap + 1 so the extra row proves
+      // truncation.
+      const userLimit = Number(cmd.limit);
+      const fetchLimit = Number.isFinite(userLimit) && userLimit > 0
+        ? Math.min(userLimit, cap + 1)
+        : cap + 1;
       const db = client.db();
-      const docs = await db.collection(collection).find(filter).limit(limit).toArray();
-      const columns = docs.length > 0 ? Object.keys(docs[0]) : [];
-      return { columns, rows: docs as Record<string, unknown>[] };
+      const docs = await db.collection(collection).find(filter).limit(fetchLimit).toArray();
+      const capped = applyRowCap(docs as Record<string, unknown>[], cap);
+      const columns = capped.rows.length > 0 ? Object.keys(capped.rows[0]) : [];
+      return {
+        columns,
+        rows: capped.rows,
+        // Only surfaced when rows were actually dropped ("no flag" otherwise).
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     }
 
     if (cmd.count) {
@@ -298,7 +320,13 @@ export class MongoDbConnector implements DatabaseConnector {
       const filter = (cmd.filter as Record<string, unknown>) || {};
       const db = client.db();
       const count = await db.collection(collection).countDocuments(filter);
-      return { columns: ["count"], rows: [{ count }] };
+      const capped = applyRowCap([{ count }], cap);
+      return {
+        columns: ["count"],
+        rows: capped.rows,
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     }
 
     if (cmd.distinct) {
@@ -307,16 +335,34 @@ export class MongoDbConnector implements DatabaseConnector {
       const filter = (cmd.filter as Record<string, unknown>) || {};
       const db = client.db();
       const values = await db.collection(collection).distinct(field, filter);
-      return { columns: [field], rows: values.map((v) => ({ [field]: v })) };
+      const capped = applyRowCap(values.map((v) => ({ [field]: v })) as Record<string, unknown>[], cap);
+      return {
+        columns: [field],
+        rows: capped.rows,
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     }
 
     if (cmd.aggregate) {
       const collection = String(cmd.aggregate);
       const pipeline = (cmd.pipeline as any[]) || [];
+      // Append $limit(cap + 1) only when no terminal write stage would be
+      // broken by a stage after it; otherwise run as written and slice below.
+      const hasTerminalWrite = pipeline.some(
+        (stage) => stage && typeof stage === "object" && ("$out" in stage || "$merge" in stage)
+      );
+      const effectivePipeline = hasTerminalWrite ? pipeline : [...pipeline, { $limit: cap + 1 }];
       const db = client.db();
-      const docs = await db.collection(collection).aggregate(pipeline).toArray();
-      const columns = docs.length > 0 ? Object.keys(docs[0]) : [];
-      return { columns, rows: docs as Record<string, unknown>[] };
+      const docs = await db.collection(collection).aggregate(effectivePipeline).toArray();
+      const capped = applyRowCap(docs as Record<string, unknown>[], cap);
+      const columns = capped.rows.length > 0 ? Object.keys(capped.rows[0]) : [];
+      return {
+        columns,
+        rows: capped.rows,
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     }
 
     throw new Error("Unsupported query command");

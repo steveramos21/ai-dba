@@ -93,7 +93,7 @@ function formatDuration(ms: number): string {
 }
 
 // ─── Helper: render query results ──────────────────────────────
-function renderResult(result: { columns: string[]; rows: Record<string, unknown>[]; affectedRows?: number }): void {
+function renderResult(result: { columns: string[]; rows: Record<string, unknown>[]; affectedRows?: number; truncated?: boolean; rowCap?: number }): void {
   if (result.rows.length === 0 && result.columns.length === 0) {
     console.log(chalk.yellow("Empty set"));
   } else if (result.affectedRows !== undefined) {
@@ -115,6 +115,9 @@ function renderResult(result: { columns: string[]; rows: Record<string, unknown>
       }));
     }
     console.log(table.toString());
+    if (result.truncated) {
+      console.log(chalk.yellow(`Results truncated at ${result.rowCap ?? result.rows.length} rows (raise rowLimit in config.yaml to see more)`));
+    }
     console.log(chalk.dim(`${result.rows.length} row(s) in set`));
   }
 }

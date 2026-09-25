@@ -19,6 +19,8 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+import { resolveRowLimit } from "../config.js";
+import { applyRowCap, rewriteWithFetchFirst } from "../truncate.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
 // startup free of driver cost. Guarded by npm run test:coldstart.
@@ -430,19 +432,36 @@ export class OracleConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, EXPLAIN, DESCRIBE) are allowed for now.");
     }
 
+    const cap = resolveRowLimit(config);
+    // Sprint 10 Part 2a — row cap. Server-side FETCH FIRST n+1 only when
+    // provably safe (see src/truncate.ts); on any doubt the statement runs as
+    // written and the client-side slice below enforces the cap with the same
+    // honest flag. maxRows must be set explicitly rather than relying on the
+    // driver default, which varies by release (0 = unlimited in oracledb 7,
+    // capped at 100 in older drivers) — cap + 1 bounds the driver-side fetch
+    // to exactly what the cap logic needs.
+    const effectiveSql = rewriteWithFetchFirst(sql, cap + 1) ?? sql;
+
     const pool = await this.getPool(engineId, config);
     const conn = await pool.getConnection();
     try {
-      const result = await conn.execute(sql, [], { resultSet: false });
+      const result = await conn.execute(effectiveSql, [], { resultSet: false, maxRows: cap + 1 });
       const columns = (result.metaData || []).map((m: { name: string }) => m.name);
-      const rows = (result.rows || []).map((row: any[]) => {
+      const rows: Record<string, unknown>[] = (result.rows || []).map((row: any[]) => {
         const record: Record<string, unknown> = {};
         for (let i = 0; i < columns.length; i++) {
           record[columns[i]] = row[i];
         }
         return record;
       });
-      return { columns, rows };
+      const capped = applyRowCap(rows, cap);
+      return {
+        columns,
+        rows: capped.rows,
+        // Only surfaced when rows were actually dropped ("no flag" otherwise).
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     } finally {
       await conn.close();
     }

@@ -165,3 +165,55 @@ describe("PostgreSQLConnector — cold-start concurrency", () => {
     expect(poolCtorMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("PostgreSQLConnector — row cap (Task 1.2)", () => {
+  function setupCap(rows: Record<string, unknown>[]) {
+    const connector = new PostgreSQLConnector();
+    const mockClient = {
+      query: vi.fn().mockResolvedValue({ rows, rowCount: rows.length, fields: [{ name: "id" }] }),
+      release: vi.fn(),
+    };
+    const pool = {
+      connect: vi.fn().mockResolvedValue(mockClient),
+      end: vi.fn(),
+    };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("cap-engine", pool);
+    const config: EngineConfig = { type: "postgres", url: "postgresql://postgres@localhost/db", rowLimit: 2 };
+    return { connector, mockClient, config };
+  }
+
+  it("rewrites a bare SELECT with LIMIT n+1 and flags truncation when the extra row arrives", async () => {
+    const { connector, mockClient, config } = setupCap([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t");
+
+    const sql = mockClient.query.mock.calls[0][0] as string;
+    expect(sql).toContain("SELECT * FROM t");
+    expect(sql).toContain("\nLIMIT 3");
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+    expect(result.rowCap).toBe(2);
+  });
+
+  it("does not flag truncation when rows are at or under the cap", async () => {
+    const { connector, config } = setupCap([{ id: 1 }, { id: 2 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t");
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBeUndefined();
+    expect(result.rowCap).toBeUndefined();
+  });
+
+  it("runs the statement as written and slices client-side when the rewrite is unsafe (existing LIMIT)", async () => {
+    const { connector, mockClient, config } = setupCap([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t LIMIT 50");
+
+    const sql = mockClient.query.mock.calls[0][0] as string;
+    expect(sql).toBe("SELECT * FROM t LIMIT 50");
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+  });
+});
