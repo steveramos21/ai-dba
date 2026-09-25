@@ -3,7 +3,8 @@
 // ----------------------------------------------------------------------------
 // Verifies the three safety primitives end-to-end against a live compose stack:
 //   1. Row cap + honest truncation   (all 5 engines where seedable)
-//   2. Query + connect timeouts      (mysql/pg strict; sqlserver/oracle attempt)
+//   2. Query + connect timeouts      (mysql/pg strict; sqlserver/oracle attempt;
+//      post-timeout health pinned for mysql/pg/sqlserver/oracle + mongo client-health)
 //   3. Degraded-on-empty             (pg live; unit-only elsewhere, gaps noted)
 // Cross-platform (Windows node / Linux node). Run from the repo root:
 //    node test/part2a-verify.mjs
@@ -51,6 +52,7 @@ function raceCap(promise, capMs) {
   ]).finally(() => clearTimeout(t));
 }
 const isCap = (e) => /HARNESS_CAP/.test(String(e && e.message));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // --- docker helpers (seeds + container health) ------------------------------
 function docker(args, input, capMs = 180000) {
@@ -190,9 +192,9 @@ async function probeQueryTimeout(label, conn, id, cfg, sql, instantIsSkip) {
   }
 }
 
-async function probePoolHealth(label, conn, id, cfg) {
+async function probePoolHealth(label, conn, id, cfg, sql) {
   try {
-    const res = await raceCap(conn.query(id, cfg, 'SELECT 1 AS ok'), 15000);
+    const res = await raceCap(conn.query(id, cfg, sql || 'SELECT 1 AS ok'), 15000);
     const n = (res.rows || []).length;
     if (n >= 1) pass(label + ' pool-health after timeout', 'SELECT 1 ok rows=' + n);
     else fail(label + ' pool-health after timeout', 'SELECT 1 returned rows=' + n);
@@ -284,6 +286,15 @@ async function main() {
       else if (n > CAP) fail('mongodb row-cap', 'rows=' + n + ' truncated=' + res.truncated + ' elapsed_ms=' + el + ' - no cap applied');
       else skip('mongodb row-cap', 'rows=' + n + ' truncated=' + (res.truncated || false) + ' elapsed_ms=' + el + ' - likely driver first-batch bound; cap not exercised on command path (recorded gap)');
     } catch (e) { fail('mongodb row-cap', 'threw: ' + String(e.message).slice(0, 180)); }
+    // m3 (review): no timeout trigger exists on this stack (SKIP below), so
+    // this is a client-health pin after the capped op - the pooled client must
+    // stay usable. Count command (SELECT 1 is not valid on the command path).
+    try {
+      const h = await raceCap(mongodbConnector.query('mongodb-test', MONGO, JSON.stringify({ count: 'rowcap_test', filter: {} })), 20000);
+      const hn = (h.rows || []).length;
+      if (hn >= 1) pass('mongodb client-health after capped op', 'count cmd ok rows=' + hn);
+      else fail('mongodb client-health after capped op', 'count returned rows=' + hn);
+    } catch (e) { fail('mongodb client-health after capped op', String(e.message).slice(0, 160)); }
     skip('mongodb query-timeout', 'no callable server-side sleep; maxTimeMS wiring covered by unit tests (recorded gap)');
   } else { skip('mongodb probes', 'seed unavailable - recorded gap'); }
 
@@ -295,6 +306,11 @@ async function main() {
 
   section('SQL SERVER QUERY TIMEOUT (heavy read-only SELECT; requestTimeout must kill it)');
   await probeQueryTimeout('sqlserver', sqlserverConnector, 'mssql-to', MSSQL, 'SELECT COUNT(*) FROM sys.all_columns a CROSS JOIN sys.all_columns b CROSS JOIN sys.all_columns c', false);
+  // m3 (review): the tedious connection is expected to stay usable after a
+  // request-level timeout (request.cancel(); connection reused) - pin it. Same
+  // engineId + effective override config as the timeout probe, or the
+  // fingerprint would rebuild the connection and green the check vacuously.
+  await probePoolHealth('sqlserver', sqlserverConnector, 'mssql-to', Object.assign({}, MSSQL, { queryTimeoutMs: OVERRIDE_MS }));
 
   section('CONNECT TIMEOUT - PG DEAD HOST');
   await probeDeadHost();
@@ -306,6 +322,12 @@ async function main() {
   section('ORACLE (gated on v$ access)');
   if (oraLive) {
     await probeQueryTimeout('oracle', oracleConnector, 'oracle-to', ORA, 'SELECT SYS.AI_DBA_SLEEP(5) AS s FROM DUAL', true);
+    // m3 (review): the detached drop completes in the background after the
+    // server-side SLEEP(5) settles - bounded settle so the health probe does
+    // not race the teardown (a transient red here would read as a regression).
+    // Oracle has no SELECT-without-FROM: DUAL required.
+    await sleep(7000);
+    await probePoolHealth('oracle', oracleConnector, 'oracle-to', Object.assign({}, ORA, { queryTimeoutMs: OVERRIDE_MS }), 'SELECT 1 AS ok FROM DUAL');
     await probeFalsePass('oracle', oracleConnector, 'oracle-badcol', ORA, 'SELECT nonexistent_col_abc FROM dual');
   }
 }
