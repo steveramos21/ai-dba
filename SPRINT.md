@@ -478,4 +478,4 @@ Residual ~8 s MCP startup on 9p is the MCP SDK import itself (~6.8 s standalone 
 | PostgreSQL dead-host connect | pending @ 45 s | bounded typed error @ 5014 ms |
 | PostgreSQL degraded path | silent empty | `degraded.reason` (`pg_stat_statements` unavailable) |
 
-Harness: **19 PASS / 0 FAIL / 1 SKIP** (MongoDB query-timeout — no callable server-side sleep; `maxTimeMS` wiring unit-covered, recorded gap). Unit **188/188** · integration 121 · sprint8 86 · sprint9 115 · blocking 21 · cold-start 3/3 — all suites exit 0. Host note: stevepc runs MongoDB 4.4 via a host-local compose override (Xeon W3680 has no AVX); the override is not part of the repo.
+Harness: **19 PASS / 0 FAIL / 1 SKIP** (MongoDB query-timeout — no callable server-side sleep; `maxTimeMS` wiring unit-covered, recorded gap). Unit **188/188** · integration 121 · sprint8 98 · sprint9 115 · blocking 21 · cold-start 3/3 — all suites exit 0. Host note: stevepc runs MongoDB 4.4 via a host-local compose override (Xeon W3680 has no AVX); the override is not part of the repo.
