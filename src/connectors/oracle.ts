@@ -530,7 +530,14 @@ export class OracleConnector implements DatabaseConnector {
       // pool) so it cannot hold a pool slot. The drop itself may fail against
       // a dead session; the connection is discarded either way.
       if (timedOut) {
-        await Promise.resolve(conn.close({ drop: true })).catch(() => { /* session already unusable */ });
+        // Detached on purpose (v2 fix, 2026-09-26): oracledb's close() waits
+        // for the in-flight call to settle, so awaiting it here held the
+        // CALLER to server completion — the exact contract this timeout
+        // exists to prevent (live probe: SLEEP(30) surfaced at 30.3s with an
+        // awaited drop, vs the 2000ms override). Initiate the drop, return
+        // promptly; teardown completes in the background (the exec promise's
+        // late rejection is already guarded above).
+        void Promise.resolve(conn.close({ drop: true })).catch(() => { /* session already unusable */ });
       } else {
         await conn.close();
       }

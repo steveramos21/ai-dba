@@ -127,6 +127,31 @@ describe("OracleConnector — timeouts (Task 1.3)", () => {
     expect(fakeConn.callTimeout).toBe(25);
     expect(fakeConn.close).toHaveBeenCalledWith({ drop: true });
   });
+
+  it("releases the caller at the timeout even while close() is still pending (caller-bound contract)", async () => {
+    // The v1 AFTER run caught this: oracledb's close() waits for the
+    // in-flight call to settle, so an awaited drop held the caller to server
+    // completion (live: SLEEP(30) surfaced at 30.3s). The teardown is
+    // detached on the timeout path; this pins that the caller must be
+    // released near the timeout window even when close() never settles.
+    const connector = new OracleConnector();
+    const never = new Promise<never>(() => {});
+    const fakeConn = {
+      execute: vi.fn().mockImplementation(() => never),
+      close: vi.fn().mockImplementation(() => never),
+      callTimeout: 0,
+    };
+    const fakePool = { getConnection: vi.fn().mockResolvedValue(fakeConn) };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("slow-oracle-pending-close", fakePool);
+    const config: EngineConfig = { type: "oracle", url: "oracle://u:p@localhost:1521/XE", queryTimeoutMs: 25 };
+
+    const t0 = Date.now();
+    await expect(connector.query("slow-oracle-pending-close", config, "SELECT id FROM t"))
+      .rejects.toThrow(/exceeded its 25ms/);
+    expect(Date.now() - t0).toBeLessThan(1500);
+    expect(fakeConn.close).toHaveBeenCalledWith({ drop: true });
+  });
 });
 
 describe("OracleConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
