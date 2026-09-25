@@ -372,7 +372,7 @@ engines:
     type: mysql
     url: mysql://readonly:***@prod-db.internal:3306/app_db
     rowLimit: 1000            # query() row cap — result sliced to this with `truncated: true`
-    queryTimeoutMs: 30000     # per-query timeout (ms) — timed-out connections are destroyed
+    queryTimeoutMs: 30000     # per-query timeout (ms) — timed-out sessions are never returned to a pool
     connectTimeoutMs: 10000   # connect timeout (ms)
 ```
 

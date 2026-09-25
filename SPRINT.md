@@ -460,7 +460,7 @@ Residual ~8 s MCP startup on 9p is the MCP SDK import itself (~6.8 s standalone 
 
 ### What was built
 - **Row cap + honest truncation** — `query()` slices to `rowLimit` (default 1000) and reports `truncated: true` + `rowCap` when capped; exactly-at-cap is *not* flagged.
-- **Per-engine query timeouts** — `queryTimeoutMs` (default 30000); typed errors; timed-out connections are destroyed, never returned to a pool.
+- **Per-engine query timeouts** — `queryTimeoutMs` (default 30000); bounded driver-native errors; a timed-out session is never returned to a pool — MySQL/PostgreSQL/Oracle destroy it (Oracle drop detached so the caller is released at the bound), SQL Server cancels the request only (connection reused), MongoDB cancels server-side (client reusable).
 - **Per-engine connect timeouts** — `connectTimeoutMs` (default 10000); a dead host no longer hangs a check.
 - **Degraded-on-empty** — privilege/extension errors (42P01, ORA-00942, ORA-01031, access-denied, code 13) return `degraded` + reason instead of a silent empty; wrong-column errors (ORA-00904, 42703, ER_BAD_FIELD_ERROR, "Invalid column name") **rethrow**.
 - **Config safety fields** — per-engine `rowLimit` / `queryTimeoutMs` / `connectTimeoutMs` overrides in `config.yaml`; unknown keys fail loud at startup; limit changes rebuild the cached pool/connection.
