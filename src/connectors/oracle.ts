@@ -503,8 +503,10 @@ export class OracleConnector implements DatabaseConnector {
       const result = await withTimeout(execPromise, queryTimeoutMs, `oracle query (${engineId})`)
         .catch((err) => {
           // ORA-01013 is the server-side twin of our race expiry (callTimeout
-          // fired). Either way the session is mid-call and must not be reused.
-          if (err instanceof QueryTimeoutError || /ORA-01013/.test(String((err as any)?.message))) {
+          // fired); NJS-123 is the thin driver's callTimeout expiry surface
+          // (it can reject before our race timer). Either way the session is
+          // mid-call and must not be reused.
+          if (err instanceof QueryTimeoutError || /ORA-01013|NJS-123/.test(String((err as any)?.message))) {
             timedOut = true;
           }
           throw err;

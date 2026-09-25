@@ -152,6 +152,27 @@ describe("OracleConnector — timeouts (Task 1.3)", () => {
     expect(Date.now() - t0).toBeLessThan(1500);
     expect(fakeConn.close).toHaveBeenCalledWith({ drop: true });
   });
+
+  it("treats a thin-driver NJS-123 callTimeout rejection as the timeout path (drop, not plain close)", async () => {
+    const connector = new OracleConnector();
+    const njs = new Error("NJS-123: call timeout of 25 ms exceeded");
+    const fakeConn = {
+      execute: vi.fn().mockRejectedValue(njs),
+      close: vi.fn(),
+      callTimeout: 0,
+    };
+    const fakePool = { getConnection: vi.fn().mockResolvedValue(fakeConn) };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("njs-oracle", fakePool);
+    const config: EngineConfig = { type: "oracle", url: "oracle://u:p@localhost:1521/XE", queryTimeoutMs: 25 };
+
+    await expect(connector.query("njs-oracle", config, "SELECT id FROM t"))
+      .rejects.toThrow(/NJS-123/);
+    // The session must be dropped (never handed back to the pool), exactly as
+    // for our own race expiry — and never closed via the plain path.
+    expect(fakeConn.close).toHaveBeenCalledWith({ drop: true });
+    expect(fakeConn.close).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("OracleConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
