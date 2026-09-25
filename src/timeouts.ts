@@ -6,9 +6,10 @@
  * portable backstop for what they cannot cover (e.g. a wedged socket where
  * the server never sends its own interruption).
  *
- * Callers that race a promise which can reject AFTER the timeout has already
- * been surfaced must attach their own rejection handler to keep that late
- * rejection from becoming an unhandled rejection.
+ * Call sites that race a promise which can settle after the timeout has been
+ * surfaced keep a `.catch(() => {})` guard on that promise as belt-and-braces:
+ * Promise.race already observes both racers (a late rejection is not an
+ * unhandled rejection), but the guards keep the intent explicit — keep them.
  */
 
 export class QueryTimeoutError extends Error {
