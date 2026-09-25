@@ -2,6 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import { parseSqlServerUrl, SqlServerConnector } from "./sqlserver.js";
 import type { EngineConfig } from "../config.js";
 
+// Mock the tedious driver (loaded lazily via import() on first use) so
+// connection option plumbing can be asserted without a live server.
+const { connectionCtorMock } = vi.hoisted(() => ({ connectionCtorMock: vi.fn() }));
+vi.mock("tedious", () => ({
+  Connection: connectionCtorMock,
+  default: { Connection: connectionCtorMock },
+}));
+
 // Unit tests cover the pure function only.
 // Connector methods (listDatabases, listTables, etc.) are validated via
 // integration tests against a live SQL Server Docker container.
@@ -73,5 +81,52 @@ describe("SqlServerConnector — row cap (Task 1.2)", () => {
     expect(sql).not.toContain("TOP");
     expect(result.rows).toHaveLength(2);
     expect(result.truncated).toBe(true);
+  });
+});
+
+describe("SqlServerConnector — timeouts (Task 1.3)", () => {
+  function mockTediousConn() {
+    const listeners: Record<string, Array<(err?: unknown) => void>> = {};
+    return {
+      on(ev: string, cb: (err?: unknown) => void) {
+        (listeners[ev] ??= []).push(cb);
+        return this;
+      },
+      connect() {
+        for (const cb of listeners["connect"] ?? []) cb(undefined);
+      },
+      close: vi.fn(),
+    };
+  }
+
+  it("plumbs connectTimeout/requestTimeout into the tedious config and rebuilds the connection on override", async () => {
+    vi.clearAllMocks();
+    const connA = mockTediousConn();
+    const connB = mockTediousConn();
+    connectionCtorMock.mockReturnValueOnce(connA).mockReturnValueOnce(connB);
+    const connector = new SqlServerConnector();
+    const cfg: EngineConfig = { type: "sqlserver", url: "sqlserver://sa:x@localhost:1433/db" };
+
+    // requestTimeout must be explicit: tedious defaults it to 15000 ms, which
+    // sits BELOW the 30000 code default and would fail allowed queries early.
+    await (connector as any).getConnection("t1", cfg);
+    expect(connectionCtorMock.mock.calls[0][0].options).toMatchObject({
+      connectTimeout: 10000,
+      requestTimeout: 30000,
+    });
+
+    await (connector as any).getConnection("t1", cfg);
+    expect(connectionCtorMock).toHaveBeenCalledTimes(1);
+
+    // A later override on the same engineId must not be silently ignored by
+    // the cached connection: the stale one is closed and a fresh one built.
+    await (connector as any).getConnection("t1", { ...cfg, queryTimeoutMs: 5000 });
+    expect(connectionCtorMock).toHaveBeenCalledTimes(2);
+    expect(connectionCtorMock.mock.calls[1][0].options.requestTimeout).toBe(5000);
+    expect(connA.close).toHaveBeenCalled();
+
+    // The new fingerprint sticks — no further rebuilds.
+    await (connector as any).getConnection("t1", { ...cfg, queryTimeoutMs: 5000 });
+    expect(connectionCtorMock).toHaveBeenCalledTimes(2);
   });
 });

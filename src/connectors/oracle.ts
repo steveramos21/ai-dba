@@ -19,8 +19,14 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
-import { resolveRowLimit } from "../config.js";
+import {
+  resolveRowLimit,
+  resolveConnectTimeoutMs,
+  resolveQueryTimeoutMs,
+  timeoutConfigFingerprint,
+} from "../config.js";
 import { applyRowCap, rewriteWithFetchFirst } from "../truncate.js";
+import { withTimeout, QueryTimeoutError } from "../timeouts.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
 // startup free of driver cost. Guarded by npm run test:coldstart.
@@ -67,10 +73,26 @@ export function parseOracleUrl(url: string): {
 export class OracleConnector implements DatabaseConnector {
   private pools: Map<string, any> = new Map();
   private creatingPools: Map<string, Promise<any>> = new Map();
+  // Timeout fingerprint baked into each cached pool at creation (Task 1.3):
+  // a later config override on the same engineId must rebuild the pool.
+  private poolFingerprints: Map<string, string> = new Map();
 
   private async getPool(engineId: string, config: EngineConfig): Promise<any> {
+    const fingerprint = timeoutConfigFingerprint(config);
     const cached = this.pools.get(engineId);
-    if (cached) return cached;
+    if (cached) {
+      const recorded = this.poolFingerprints.get(engineId);
+      if (recorded === undefined) {
+        // Pool seeded outside getPool (tests / hand-wired callers): adopt it.
+        this.poolFingerprints.set(engineId, fingerprint);
+        return cached;
+      }
+      if (recorded === fingerprint) return cached;
+      // Stale: the config changed — tear the old pool down, rebuild below.
+      this.pools.delete(engineId);
+      this.poolFingerprints.delete(engineId);
+      void Promise.resolve(cached.close()).catch(() => { /* best-effort teardown of the stale pool */ });
+    }
     const inFlight = this.creatingPools.get(engineId);
     if (inFlight) return inFlight;
     const creating = (async () => {
@@ -90,8 +112,14 @@ export class OracleConnector implements DatabaseConnector {
         poolMin: 1,
         poolMax: 5,
         poolIncrement: 1,
+        // Sprint 10 Part 2a — connectTimeout for pooled connections is in
+        // SECONDS in node-oracledb (verified: lib/thin/sqlnet/sessionAtts.js
+        // multiplies params.connectTimeout by 1000). Round UP so a configured
+        // budget is never silently shortened.
+        connectTimeout: Math.ceil(resolveConnectTimeoutMs(config) / 1000),
       });
       this.pools.set(engineId, pool);
+      this.poolFingerprints.set(engineId, fingerprint);
       return pool;
     })().finally(() => this.creatingPools.delete(engineId));
     this.creatingPools.set(engineId, creating);
@@ -433,6 +461,7 @@ export class OracleConnector implements DatabaseConnector {
     }
 
     const cap = resolveRowLimit(config);
+    const queryTimeoutMs = resolveQueryTimeoutMs(config);
     // Sprint 10 Part 2a — row cap. Server-side FETCH FIRST n+1 only when
     // provably safe (see src/truncate.ts); on any doubt the statement runs as
     // written and the client-side slice below enforces the cap with the same
@@ -444,8 +473,27 @@ export class OracleConnector implements DatabaseConnector {
 
     const pool = await this.getPool(engineId, config);
     const conn = await pool.getConnection();
+    // callTimeout is a per-connection round-trip bound in ms; set it on every
+    // query so a pooled connection always carries this engine's current bound
+    // (the pool fingerprint above guarantees a config change rebuilds the pool).
+    conn.callTimeout = queryTimeoutMs;
+    let timedOut = false;
     try {
-      const result = await conn.execute(effectiveSql, [], { resultSet: false, maxRows: cap + 1 });
+      // Annotated because conn is `any` (Oracle pools are typed any) — without
+      // it, withTimeout<T> would infer T = unknown and lose the Result shape.
+      const execPromise: Promise<import("oracledb").Result> = conn.execute(effectiveSql, [], { resultSet: false, maxRows: cap + 1 });
+      // If the race below expires first, this promise may still reject later;
+      // swallow that late rejection so it can't crash the process.
+      execPromise.catch(() => {});
+      const result = await withTimeout(execPromise, queryTimeoutMs, `oracle query (${engineId})`)
+        .catch((err) => {
+          // ORA-01013 is the server-side twin of our race expiry (callTimeout
+          // fired). Either way the session is mid-call and must not be reused.
+          if (err instanceof QueryTimeoutError || /ORA-01013/.test(String((err as any)?.message))) {
+            timedOut = true;
+          }
+          throw err;
+        });
       const columns = (result.metaData || []).map((m: { name: string }) => m.name);
       const rows: Record<string, unknown>[] = (result.rows || []).map((row: any[]) => {
         const record: Record<string, unknown> = {};
@@ -463,7 +511,14 @@ export class OracleConnector implements DatabaseConnector {
         rowCap: capped.truncated ? capped.rowCap : undefined,
       };
     } finally {
-      await conn.close();
+      // On timeout the session is mid-call — drop it (never return it to the
+      // pool) so it cannot hold a pool slot. The drop itself may fail against
+      // a dead session; the connection is discarded either way.
+      if (timedOut) {
+        await Promise.resolve(conn.close({ drop: true })).catch(() => { /* session already unusable */ });
+      } else {
+        await conn.close();
+      }
     }
   }
 
@@ -523,6 +578,7 @@ export class OracleConnector implements DatabaseConnector {
       await pool.close();
     }
     this.pools.clear();
+    this.poolFingerprints.clear();
   }
 
   // ─── Sprint 9: Write operations + server diagnostics ───

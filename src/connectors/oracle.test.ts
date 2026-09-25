@@ -2,6 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import { parseOracleUrl, OracleConnector } from "./oracle.js";
 import type { EngineConfig } from "../config.js";
 
+// Mock the oracledb driver (loaded lazily via import() on first use) so pool
+// option plumbing and timeout behavior can be asserted without a live server.
+const { oracleCreatePoolMock } = vi.hoisted(() => ({ oracleCreatePoolMock: vi.fn() }));
+vi.mock("oracledb", () => ({
+  createPool: oracleCreatePoolMock,
+  default: { createPool: oracleCreatePoolMock, Pool: {}, Connection: {} },
+}));
+
 describe("parseOracleUrl", () => {
   it("extracts connection components", () => {
     const r = parseOracleUrl("oracle://scott:tiger@10.0.0.1:1521/ORCL");
@@ -75,5 +83,48 @@ describe("OracleConnector — row cap (Task 1.2)", () => {
     expect(sql).not.toContain("FETCH FIRST");
     expect(result.rows).toHaveLength(2);
     expect(result.truncated).toBe(true);
+  });
+});
+
+describe("OracleConnector — timeouts (Task 1.3)", () => {
+  it("passes connectTimeout in seconds and rebuilds the pool on override", async () => {
+    vi.clearAllMocks();
+    const poolA = { close: vi.fn().mockResolvedValue(undefined), getConnection: vi.fn() };
+    const poolB = { close: vi.fn().mockResolvedValue(undefined), getConnection: vi.fn() };
+    oracleCreatePoolMock.mockResolvedValueOnce(poolA).mockResolvedValueOnce(poolB);
+    const connector = new OracleConnector();
+    const cfg: EngineConfig = { type: "oracle", url: "oracle://u:p@localhost:1521/XE" };
+
+    // 10000 ms default must reach node-oracledb as 10 seconds — the thin
+    // driver multiplies connectTimeout by 1000 internally.
+    expect(await (connector as any).getPool("t1", cfg)).toBe(poolA);
+    expect(oracleCreatePoolMock.mock.calls[0][0]).toMatchObject({ poolMin: 1, poolMax: 5, connectTimeout: 10 });
+
+    expect(await (connector as any).getPool("t1", cfg)).toBe(poolA);
+    expect(oracleCreatePoolMock).toHaveBeenCalledTimes(1);
+
+    const overridden = { ...cfg, connectTimeoutMs: 15000 };
+    expect(await (connector as any).getPool("t1", overridden)).toBe(poolB);
+    expect(oracleCreatePoolMock).toHaveBeenCalledTimes(2);
+    expect(oracleCreatePoolMock.mock.calls[1][0].connectTimeout).toBe(15);
+    expect(poolA.close).toHaveBeenCalled();
+  });
+
+  it("drops the session after a query exceeds queryTimeoutMs", async () => {
+    const connector = new OracleConnector();
+    const fakeConn = {
+      execute: vi.fn().mockImplementation(() => new Promise(() => {})),
+      close: vi.fn(),
+      callTimeout: 0,
+    };
+    const fakePool = { getConnection: vi.fn().mockResolvedValue(fakeConn) };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("slow-oracle", fakePool);
+    const config: EngineConfig = { type: "oracle", url: "oracle://u:p@localhost:1521/XE", queryTimeoutMs: 25 };
+
+    await expect(connector.query("slow-oracle", config, "SELECT id FROM t"))
+      .rejects.toThrow(/exceeded its 25ms/);
+    expect(fakeConn.callTimeout).toBe(25);
+    expect(fakeConn.close).toHaveBeenCalledWith({ drop: true });
   });
 });

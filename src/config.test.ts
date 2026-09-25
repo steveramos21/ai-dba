@@ -7,6 +7,7 @@ import {
   resolveRowLimit,
   resolveQueryTimeoutMs,
   resolveConnectTimeoutMs,
+  timeoutConfigFingerprint,
   loadConfig,
 } from "./config.js";
 
@@ -123,5 +124,25 @@ describe("safety-limit validation (fail loud)", () => {
     } finally {
       cleanup();
     }
+  });
+});
+
+// Task 1.3: the fingerprint decides whether a cached pool/connection can be
+// reused. Equality for equal configs; inequality when a timeout override
+// changes; and non-timeout fields must NOT force needless rebuilds.
+describe("timeoutConfigFingerprint (Task 1.3)", () => {
+  const base = { type: "mysql" as const, url: "mysql://user@localhost:3306/db" };
+
+  it("is stable for equal configs", () => {
+    expect(timeoutConfigFingerprint(base)).toBe(timeoutConfigFingerprint({ ...base }));
+  });
+
+  it("changes when a timeout override changes", () => {
+    expect(timeoutConfigFingerprint({ ...base, queryTimeoutMs: 5000 })).not.toBe(timeoutConfigFingerprint(base));
+    expect(timeoutConfigFingerprint({ ...base, connectTimeoutMs: 20000 })).not.toBe(timeoutConfigFingerprint(base));
+  });
+
+  it("ignores fields that do not affect pool construction", () => {
+    expect(timeoutConfigFingerprint({ ...base, database: "other" })).toBe(timeoutConfigFingerprint(base));
   });
 });

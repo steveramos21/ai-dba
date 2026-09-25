@@ -61,6 +61,18 @@ export function resolveConnectTimeoutMs(config: EngineConfig): number {
   return config.connectTimeoutMs ?? SAFETY_DEFAULTS.connectTimeoutMs;
 }
 
+/**
+ * Fingerprint of the timeout values baked into a cached pool/connection at
+ * creation time (Task 1.3). Connectors compare it on every reuse so a later
+ * config override on the same engineId rebuilds the pool instead of being
+ * silently ignored. Deliberately conservative: it includes the per-query
+ * timeout even for engines that apply it per operation, so an override can
+ * never go unnoticed.
+ */
+export function timeoutConfigFingerprint(config: EngineConfig): string {
+  return `connect=${resolveConnectTimeoutMs(config)};query=${resolveQueryTimeoutMs(config)}`;
+}
+
 /** Config keys that must be positive integers when present (fail loud at load). */
 const NUMERIC_LIMIT_FIELDS = ["rowLimit", "queryTimeoutMs", "connectTimeoutMs"] as const;
 

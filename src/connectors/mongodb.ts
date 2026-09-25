@@ -20,8 +20,14 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
-import { resolveRowLimit } from "../config.js";
+import {
+  resolveRowLimit,
+  resolveConnectTimeoutMs,
+  resolveQueryTimeoutMs,
+  timeoutConfigFingerprint,
+} from "../config.js";
 import { applyRowCap } from "../truncate.js";
+import { withTimeout, QueryTimeoutError } from "../timeouts.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
 // startup free of driver cost. Guarded by npm run test:coldstart.
@@ -62,13 +68,29 @@ export function parseMongoUrl(url: string): { uri: string; database: string } {
 export class MongoDbConnector implements DatabaseConnector {
   private clients: Map<string, MongoClient> = new Map();
   private creatingClients: Map<string, Promise<{ client: MongoClient; db: Db; database: string }>> = new Map();
+  // Timeout fingerprint baked into each cached client at creation (Task 1.3):
+  // a later config override on the same engineId must rebuild the client.
+  private clientFingerprints: Map<string, string> = new Map();
 
   private async getClient(engineId: string, config: EngineConfig): Promise<{ client: MongoClient; db: Db; database: string }> {
+    const fingerprint = timeoutConfigFingerprint(config);
     const cached = this.clients.get(engineId);
     if (cached) {
-      // Extract database from URL for the existing client
-      const { database } = config.url ? parseMongoUrl(config.url) : { database: config.database || "admin" };
-      return { client: cached, db: cached.db(database), database };
+      const recorded = this.clientFingerprints.get(engineId);
+      const extractDb = () => {
+        const { database } = config.url ? parseMongoUrl(config.url) : { database: config.database || "admin" };
+        return { client: cached, db: cached.db(database), database };
+      };
+      if (recorded === undefined) {
+        // Client seeded outside getClient (tests / hand-wired callers): adopt it.
+        this.clientFingerprints.set(engineId, fingerprint);
+        return extractDb();
+      }
+      if (recorded === fingerprint) return extractDb();
+      // Stale: the config changed — tear the old client down, rebuild below.
+      this.clients.delete(engineId);
+      this.clientFingerprints.delete(engineId);
+      void Promise.resolve(cached.close()).catch(() => { /* best-effort teardown of the stale client */ });
     }
     const inFlight = this.creatingClients.get(engineId);
     if (inFlight) return inFlight;
@@ -78,9 +100,18 @@ export class MongoDbConnector implements DatabaseConnector {
         : { uri: `mongodb://${config.host || "localhost"}:${config.port || 27017}`, database: config.database || "admin" };
 
       const { MongoClient } = await loadDriver();
-      const client = new MongoClient(uri);
+      const client = new MongoClient(uri, {
+        // Sprint 10 Part 2a — timeouts (ms). serverSelectionTimeoutMS bounds
+        // server selection (the dead-host case) and connectTimeoutMS bounds
+        // the TCP connect; per-operation bounds are applied via maxTimeMS in
+        // query(). All three are baked into the client at creation, so a
+        // config override rebuilds the client (fingerprint above).
+        serverSelectionTimeoutMS: resolveConnectTimeoutMs(config),
+        connectTimeoutMS: resolveConnectTimeoutMs(config),
+      });
       await client.connect();
       this.clients.set(engineId, client);
+      this.clientFingerprints.set(engineId, fingerprint);
       return { client, db: client.db(database), database };
     })().finally(() => this.creatingClients.delete(engineId));
     this.creatingClients.set(engineId, creating);
@@ -279,9 +310,13 @@ export class MongoDbConnector implements DatabaseConnector {
 
     const { client } = await this.getClient(engineId, config);
 
+    const queryTimeoutMs = resolveQueryTimeoutMs(config);
+
     if (cmd.ping) {
       const admin = client.db().admin();
-      const result = await admin.ping();
+      const pingPromise = admin.ping({ maxTimeMS: queryTimeoutMs });
+      pingPromise.catch(() => {});
+      const result = await withTimeout(pingPromise, queryTimeoutMs, `mongo ping (${engineId})`);
       return { columns: ["ok"], rows: [{ ok: result.ok }] };
     }
 
@@ -303,7 +338,12 @@ export class MongoDbConnector implements DatabaseConnector {
         ? Math.min(userLimit, cap + 1)
         : cap + 1;
       const db = client.db();
-      const docs = await db.collection(collection).find(filter).limit(fetchLimit).toArray();
+      // maxTimeMS is the server-side per-operation bound; the withTimeout race
+      // is the portable backstop for a wedged socket (a mongo timeout leaves
+      // the client healthy — no teardown needed, unlike mysql/pg/oracle).
+      const opPromise = db.collection(collection).find(filter, { maxTimeMS: queryTimeoutMs }).limit(fetchLimit).toArray();
+      opPromise.catch(() => {});
+      const docs = await withTimeout(opPromise, queryTimeoutMs, `mongo find (${engineId})`);
       const capped = applyRowCap(docs as Record<string, unknown>[], cap);
       const columns = capped.rows.length > 0 ? Object.keys(capped.rows[0]) : [];
       return {
@@ -319,7 +359,9 @@ export class MongoDbConnector implements DatabaseConnector {
       const collection = String(cmd.count);
       const filter = (cmd.filter as Record<string, unknown>) || {};
       const db = client.db();
-      const count = await db.collection(collection).countDocuments(filter);
+      const opPromise = db.collection(collection).countDocuments(filter, { maxTimeMS: queryTimeoutMs });
+      opPromise.catch(() => {});
+      const count = await withTimeout(opPromise, queryTimeoutMs, `mongo count (${engineId})`);
       const capped = applyRowCap([{ count }], cap);
       return {
         columns: ["count"],
@@ -334,7 +376,9 @@ export class MongoDbConnector implements DatabaseConnector {
       const field = String(cmd.field);
       const filter = (cmd.filter as Record<string, unknown>) || {};
       const db = client.db();
-      const values = await db.collection(collection).distinct(field, filter);
+      const opPromise = db.collection(collection).distinct(field, filter, { maxTimeMS: queryTimeoutMs });
+      opPromise.catch(() => {});
+      const values = await withTimeout(opPromise, queryTimeoutMs, `mongo distinct (${engineId})`);
       const capped = applyRowCap(values.map((v) => ({ [field]: v })) as Record<string, unknown>[], cap);
       return {
         columns: [field],
@@ -354,7 +398,9 @@ export class MongoDbConnector implements DatabaseConnector {
       );
       const effectivePipeline = hasTerminalWrite ? pipeline : [...pipeline, { $limit: cap + 1 }];
       const db = client.db();
-      const docs = await db.collection(collection).aggregate(effectivePipeline).toArray();
+      const opPromise = db.collection(collection).aggregate(effectivePipeline, { maxTimeMS: queryTimeoutMs }).toArray();
+      opPromise.catch(() => {});
+      const docs = await withTimeout(opPromise, queryTimeoutMs, `mongo aggregate (${engineId})`);
       const capped = applyRowCap(docs as Record<string, unknown>[], cap);
       const columns = capped.rows.length > 0 ? Object.keys(capped.rows[0]) : [];
       return {
@@ -396,6 +442,7 @@ export class MongoDbConnector implements DatabaseConnector {
       await client.close();
     }
     this.clients.clear();
+    this.clientFingerprints.clear();
   }
 
   // ─── Sprint 9: Write operations + server diagnostics ───

@@ -20,7 +20,12 @@ import type {
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
-import { resolveRowLimit } from "../config.js";
+import {
+  resolveRowLimit,
+  resolveConnectTimeoutMs,
+  resolveQueryTimeoutMs,
+  timeoutConfigFingerprint,
+} from "../config.js";
 import { applyRowCap, rewriteWithTop } from "../truncate.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
@@ -124,10 +129,32 @@ class TediousConnection {
 export class SqlServerConnector implements DatabaseConnector {
   private connections: Map<string, TediousConnection> = new Map();
   private creatingConnections: Map<string, Promise<TediousConnection>> = new Map();
+  // Timeout fingerprint baked into each cached connection at creation
+  // (Task 1.3): a later config override on the same engineId must rebuild the
+  // connection instead of being silently ignored.
+  private connectionFingerprints: Map<string, string> = new Map();
 
   private async getConnection(engineId: string, config: EngineConfig): Promise<TediousConnection> {
+    const fingerprint = timeoutConfigFingerprint(config);
     const cached = this.connections.get(engineId);
-    if (cached) return cached;
+    if (cached) {
+      const recorded = this.connectionFingerprints.get(engineId);
+      if (recorded === undefined) {
+        // Connection seeded outside getConnection (tests / hand-wired
+        // callers): nothing to compare, so adopt it.
+        this.connectionFingerprints.set(engineId, fingerprint);
+        return cached;
+      }
+      if (recorded === fingerprint) return cached;
+      // Stale: the config changed — evict and rebuild below.
+      this.connections.delete(engineId);
+      this.connectionFingerprints.delete(engineId);
+      try {
+        cached.close();
+      } catch {
+        // best-effort teardown of the stale connection
+      }
+    }
     const inFlight = this.creatingConnections.get(engineId);
     if (inFlight) return inFlight;
     const creating = (async () => {
@@ -156,11 +183,18 @@ export class SqlServerConnector implements DatabaseConnector {
           database: cfg.database,
           trustServerCertificate: true,
           encrypt: false,
+          // Sprint 10 Part 2a — timeouts (ms). connectTimeout bounds the
+          // handshake with a dead host; requestTimeout bounds each request.
+          // It MUST be set explicitly: tedious defaults it to 15000, which is
+          // below the 30000 code default and would fail allowed queries early.
+          connectTimeout: resolveConnectTimeoutMs(config),
+          requestTimeout: resolveQueryTimeoutMs(config),
         },
       });
 
       await conn.connect();
       this.connections.set(engineId, conn);
+      this.connectionFingerprints.set(engineId, fingerprint);
       return conn;
     })().finally(() => this.creatingConnections.delete(engineId));
     this.creatingConnections.set(engineId, creating);
@@ -473,6 +507,7 @@ export class SqlServerConnector implements DatabaseConnector {
       conn.close();
     }
     this.connections.clear();
+    this.connectionFingerprints.clear();
   }
 
   // ─── Sprint 9: Write operations + server diagnostics ───

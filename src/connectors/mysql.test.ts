@@ -185,9 +185,14 @@ describe("MySQLConnector — row cap (Task 1.2)", () => {
 
     const result = await connector.query("cap-engine", config, "SELECT * FROM t");
 
-    const sql = mockConnection.query.mock.calls[0][0] as string;
-    expect(sql).toContain("SELECT * FROM t");
-    expect(sql).toContain("\nLIMIT 3");
+    // Task 1.3: SELECT/WITH gets a bounded SET SESSION prelude first, then the
+    // capped query itself (object form carries the per-query timeout).
+    const calls = mockConnection.query.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0].sql).toBe("SET SESSION max_execution_time = 30000");
+    expect(calls[1][0].sql).toContain("SELECT * FROM t");
+    expect(calls[1][0].sql).toContain("\nLIMIT 3");
+    expect(calls[1][0].timeout).toBe(30000);
     expect(result.rows).toHaveLength(2);
     expect(result.truncated).toBe(true);
     expect(result.rowCap).toBe(2);
@@ -208,10 +213,64 @@ describe("MySQLConnector — row cap (Task 1.2)", () => {
 
     const result = await connector.query("cap-engine", config, "SHOW TABLES");
 
-    const sql = mockConnection.query.mock.calls[0][0] as string;
-    expect(sql).toBe("SHOW TABLES");
-    expect(sql).not.toContain("LIMIT");
+    const calls = mockConnection.query.mock.calls;
+    // Non-SELECT: no SET SESSION prelude — exactly one call, object form.
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0].sql).toBe("SHOW TABLES");
+    expect(calls[0][0].sql).not.toContain("LIMIT");
     expect(result.rows).toHaveLength(2);
     expect(result.truncated).toBe(true);
+  });
+});
+
+describe("MySQLConnector — timeouts (Task 1.3)", () => {
+  const baseConfig: EngineConfig = { type: "mysql", url: "mysql://root@localhost/db" };
+
+  it("rebuilds the pool when the timeout config changes for the same engineId", async () => {
+    vi.clearAllMocks();
+    const poolA = { end: vi.fn() };
+    const poolB = { end: vi.fn() };
+    createPoolMock.mockReturnValueOnce(poolA).mockReturnValueOnce(poolB);
+    const connector = new MySQLConnector();
+
+    expect(await connector.getPool("override-engine", baseConfig)).toBe(poolA);
+    // Plumbing: the URL form must go through an options object so
+    // connectTimeout actually applies (a bare URL string would drop it).
+    expect(createPoolMock.mock.calls[0][0]).toMatchObject({
+      uri: "mysql://root@localhost/db",
+      connectTimeout: 10000,
+    });
+    expect(await connector.getPool("override-engine", baseConfig)).toBe(poolA);
+    expect(createPoolMock).toHaveBeenCalledTimes(1);
+
+    // A later override on the same engineId must not be silently ignored by
+    // the cached pool: the stale pool is torn down and a fresh one built.
+    const overridden = { ...baseConfig, queryTimeoutMs: 5000 };
+    expect(await connector.getPool("override-engine", overridden)).toBe(poolB);
+    expect(createPoolMock).toHaveBeenCalledTimes(2);
+    expect(poolA.end).toHaveBeenCalled();
+
+    // The new fingerprint sticks — no further rebuilds.
+    expect(await connector.getPool("override-engine", overridden)).toBe(poolB);
+    expect(createPoolMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("destroys the connection when a query exceeds queryTimeoutMs", async () => {
+    const connector = new MySQLConnector();
+    const mockConnection = {
+      query: vi.fn()
+        .mockResolvedValueOnce([[], []])                       // SET SESSION prelude
+        .mockImplementationOnce(() => new Promise(() => {})),  // main query hangs
+      release: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const pool = { getConnection: vi.fn().mockResolvedValue(mockConnection), end: vi.fn() };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("slow-engine", pool);
+    const config: EngineConfig = { type: "mysql", url: "mysql://root@localhost/db", queryTimeoutMs: 25 };
+
+    await expect(connector.query("slow-engine", config, "SELECT * FROM t"))
+      .rejects.toThrow(/exceeded its 25ms/);
+    expect(mockConnection.destroy).toHaveBeenCalled();
   });
 });

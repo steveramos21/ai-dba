@@ -217,3 +217,51 @@ describe("PostgreSQLConnector — row cap (Task 1.2)", () => {
     expect(result.truncated).toBe(true);
   });
 });
+
+describe("PostgreSQLConnector — timeouts (Task 1.3)", () => {
+  const baseConfig: EngineConfig = { type: "postgres", url: "postgresql://postgres@localhost:5432/testdb" };
+
+  it("plumbs timeout options into the pool and rebuilds on override", async () => {
+    vi.clearAllMocks();
+    const poolA = { end: vi.fn().mockResolvedValue(undefined), on: vi.fn(), connect: vi.fn() };
+    const poolB = { end: vi.fn().mockResolvedValue(undefined), on: vi.fn(), connect: vi.fn() };
+    poolCtorMock.mockReturnValueOnce(poolA).mockReturnValueOnce(poolB);
+    const connector = new PostgreSQLConnector();
+
+    expect(await connector.getPool("override-pg", baseConfig)).toBe(poolA);
+    expect(poolCtorMock.mock.calls[0][0]).toMatchObject({
+      connectionString: baseConfig.url,
+      max: 5,
+      connectionTimeoutMillis: 10000,
+      statement_timeout: 30000,
+      query_timeout: 30000,
+    });
+
+    expect(await connector.getPool("override-pg", baseConfig)).toBe(poolA);
+    expect(poolCtorMock).toHaveBeenCalledTimes(1);
+
+    // A later override on the same engineId must not be silently ignored by
+    // the cached pool: the stale pool is torn down and a fresh one built.
+    const overridden = { ...baseConfig, queryTimeoutMs: 7000 };
+    expect(await connector.getPool("override-pg", overridden)).toBe(poolB);
+    expect(poolCtorMock).toHaveBeenCalledTimes(2);
+    expect(poolCtorMock.mock.calls[1][0]).toMatchObject({ statement_timeout: 7000, query_timeout: 7000 });
+    expect(poolA.end).toHaveBeenCalled();
+  });
+
+  it("destroys the client (release(true)) when a query exceeds the timeout", async () => {
+    const connector = new PostgreSQLConnector();
+    const client = {
+      query: vi.fn().mockImplementation(() => new Promise(() => {})),
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn().mockResolvedValue(client), end: vi.fn() };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("slow-pg", pool);
+    const config: EngineConfig = { type: "postgres", url: "postgresql://postgres@localhost:5432/testdb", queryTimeoutMs: 25 };
+
+    await expect(connector.query("slow-pg", config, "SELECT 1"))
+      .rejects.toThrow(/exceeded its 25ms/);
+    expect(client.release).toHaveBeenCalledWith(true);
+  });
+});
