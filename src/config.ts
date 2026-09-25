@@ -76,6 +76,28 @@ export function timeoutConfigFingerprint(config: EngineConfig): string {
 /** Config keys that must be positive integers when present (fail loud at load). */
 const NUMERIC_LIMIT_FIELDS = ["rowLimit", "queryTimeoutMs", "connectTimeoutMs"] as const;
 
+/**
+ * Every engine key read anywhere in the codebase. Anything else is a typo or
+ * dead config and fails loud at load (review M1): a silently ignored key
+ * (e.g. "queryTimeout") hides a misconfiguration behind a code default.
+ * Keep in sync with EngineConfig.
+ */
+const ENGINE_CONFIG_KEYS = new Set([
+  "type",
+  "url",
+  "host",
+  "port",
+  "user",
+  "password",
+  "database",
+  "ssl",
+  "connectionLimit",
+  "allowWriteOps",
+  "rowLimit",
+  "queryTimeoutMs",
+  "connectTimeoutMs",
+]);
+
 const DEFAULT_CONFIG_PATH = path.resolve(process.cwd(), "config.yaml");
 
 export function loadConfig(configPath?: string): AiDbaConfig {
@@ -105,6 +127,17 @@ export function loadConfig(configPath?: string): AiDbaConfig {
         `  url: mysql://user:pass@host:3306/dbname?ssl=true\n` +
         `  host: 127.0.0.1  (with port, user, password, database)`
       );
+    }
+    // Unknown keys fail loud: an unrecognized key is almost always a typo
+    // (e.g. "queryTimeout") that would otherwise be silently ignored.
+    for (const key of Object.keys(engine as unknown as Record<string, unknown>)) {
+      if (!ENGINE_CONFIG_KEYS.has(key)) {
+        throw new Error(
+          `Engine "${id}" has unknown key "${key}". ` +
+          `Allowed keys: ${[...ENGINE_CONFIG_KEYS].join(", ")}. ` +
+          `Unknown keys are never read — check for a typo.`
+        );
+      }
     }
     // Safety limits fail loud at startup — a non-numeric value must never
     // silently fall back to a default the operator did not choose.

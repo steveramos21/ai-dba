@@ -146,3 +146,37 @@ describe("timeoutConfigFingerprint (Task 1.3)", () => {
     expect(timeoutConfigFingerprint({ ...base, database: "other" })).toBe(timeoutConfigFingerprint(base));
   });
 });
+
+describe("unknown engine keys fail loud (review M1)", () => {
+  it("rejects a typo'd key instead of silently falling back to a default", () => {
+    const { path, cleanup } = writeTempConfig(BASE + "    queryTimeout: 30000\n");
+    try {
+      expect(() => loadConfig(path)).toThrow(/unknown key "queryTimeout"/);
+      expect(() => loadConfig(path)).toThrow(/Engine "e1"/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("accepts every documented engine key", () => {
+    const yaml = BASE +
+      "    host: 127.0.0.1\n" +
+      "    port: 3306\n" +
+      "    user: u\n" +
+      "    password: p\n" +
+      "    database: db\n" +
+      "    rowLimit: 500\n" +
+      "    queryTimeoutMs: 15000\n" +
+      "    connectTimeoutMs: 3000\n" +
+      "    connectionLimit: 5\n" +
+      "    allowWriteOps: true\n";
+    const { path, cleanup } = writeTempConfig(yaml);
+    try {
+      const cfg = loadConfig(path);
+      expect(cfg.engines.e1.rowLimit).toBe(500);
+      expect(cfg.engines.e1.allowWriteOps).toBe(true);
+    } finally {
+      cleanup();
+    }
+  });
+});
