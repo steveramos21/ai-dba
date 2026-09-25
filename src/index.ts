@@ -516,6 +516,9 @@ program
       if (result.estimatedCost !== undefined) {
         console.log(chalk.dim(`estimated cost: ${result.estimatedCost} | rows: ${result.estimatedRows ?? "-"}`));
       }
+      if (result.degraded) {
+        console.log(chalk.yellow(`Plan source degraded: ${result.degraded}`));
+      }
       console.log();
       console.log(result.plan);
     } catch (err) {
@@ -1081,6 +1084,9 @@ async function startRepl(
           console.log(chalk.dim(`format: ${result.format} | analyzed: ${result.analyzed}`));
           if (result.estimatedCost !== undefined) {
             console.log(chalk.dim(`estimated cost: ${result.estimatedCost} | rows: ${result.estimatedRows ?? "-"}`));
+          }
+          if (result.degraded) {
+            console.log(chalk.yellow(`Plan source degraded: ${result.degraded}`));
           }
           console.log();
           console.log(result.plan);

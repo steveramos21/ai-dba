@@ -326,6 +326,7 @@ export class OracleConnector implements DatabaseConnector {
       );
       // Step 2: Read the plan via DBMS_XPLAN
       let plan = "";
+      let degraded: string | undefined;
       try {
         const result = await conn.execute(
           `SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY(NULL, '${stmtId}'))`,
@@ -333,8 +334,11 @@ export class OracleConnector implements DatabaseConnector {
         );
         const rows = result.rows || [];
         plan = rows.map((r: any) => r[0]).join("\n");
-      } catch {
-        // DBMS_XPLAN might not be available — fallback to plan_table
+      } catch (e: any) {
+        // DBMS_XPLAN might not be available (privilege/version) — fall back to
+        // plan_table, but surface the source swap instead of silently
+        // presenting a fallback plan as if it were the preferred one (Task 1.4).
+        degraded = `DBMS_XPLAN.DISPLAY unavailable; plan read from plan_table instead: ${e?.message ?? String(e)}`;
         const result = await conn.execute(
           `SELECT
             LPAD(' ', LEVEL-1) || operation || ' ' || options || ' ' || object_name AS plan_line
@@ -347,7 +351,7 @@ export class OracleConnector implements DatabaseConnector {
         const rows = result.rows || [];
         plan = rows.map((r: any) => r[0]).join("\n");
       }
-      return { plan, format: "text", analyzed: false };
+      return { plan, format: "text", analyzed: false, ...(degraded ? { degraded } : {}) };
     } finally {
       // Step 3: Clean up — always delete the plan rows
       try {

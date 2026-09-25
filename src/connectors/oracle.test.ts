@@ -158,3 +158,45 @@ describe("OracleConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
     await expect(connector.listSlowQueries("deg-oracle", config)).rejects.toThrow(/ORA-00904/);
   });
 });
+
+describe("OracleConnector — explain degraded (Task 1.4)", () => {
+  function setupExplain(engineId: string, executeImpl: (sql: string) => Promise<unknown>) {
+    const connector = new OracleConnector();
+    const fakeConn = { execute: vi.fn().mockImplementation(executeImpl), close: vi.fn() };
+    const fakePool = { getConnection: vi.fn().mockResolvedValue(fakeConn) };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set(engineId, fakePool);
+    const config: EngineConfig = { type: "oracle", url: "oracle://u:p@localhost:1521/XE" };
+    return { connector, config };
+  }
+
+  it("surfaces a degraded reason when DBMS_XPLAN is unavailable and the plan comes from plan_table", async () => {
+    const { connector, config } = setupExplain("explain-oracle", (sql: string) => {
+      if (sql.includes("DBMS_XPLAN")) {
+        return Promise.reject(new Error("ORA-00942: table or view does not exist"));
+      }
+      if (sql.includes("FROM plan_table") && sql.includes("SELECT")) {
+        return Promise.resolve({ rows: [["| Id | Operation |"], ["| 0 | SELECT STATEMENT |"]] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    const result = await connector.explainQuery("explain-oracle", config, "SELECT 1 FROM DUAL");
+
+    expect(result.plan).toContain("SELECT STATEMENT");
+    expect(result.degraded).toContain("DBMS_XPLAN");
+    expect(result.degraded).toContain("ORA-00942");
+  });
+
+  it("still throws when every plan source fails (no silent fallback-to-empty)", async () => {
+    const { connector, config } = setupExplain("explain-oracle", (sql: string) => {
+      if (sql.includes("EXPLAIN PLAN")) {
+        return Promise.reject(new Error('ORA-00904: "NOPE": invalid identifier'));
+      }
+      return Promise.reject(new Error("ORA-00942: table or view does not exist"));
+    });
+
+    await expect(connector.explainQuery("explain-oracle", config, "SELECT bad FROM t"))
+      .rejects.toThrow(/ORA-00904/);
+  });
+});
