@@ -23,11 +23,46 @@ export interface EngineConfig {
   connectionLimit?: number;
   /** Allow write operations (kill-process). Default: false. */
   allowWriteOps?: boolean;
+  /** Query row cap for query() results. Default: 1000. */
+  rowLimit?: number;
+  /** Per-query timeout, ms. Default: 30000. */
+  queryTimeoutMs?: number;
+  /** Connect timeout, ms. Default: 10000. */
+  connectTimeoutMs?: number;
 }
 
 export interface AiDbaConfig {
   engines: Record<string, EngineConfig>;
 }
+
+/**
+ * Sprint 10 Part 2a — code defaults for the per-engine safety limits.
+ * Resolution order is code default -> per-engine config override only;
+ * connectors always receive concrete values via the resolve* helpers below.
+ */
+export const SAFETY_DEFAULTS = {
+  rowLimit: 1000,
+  queryTimeoutMs: 30000,
+  connectTimeoutMs: 10000,
+} as const;
+
+/** Resolve the query row cap for an engine (config override or code default). */
+export function resolveRowLimit(config: EngineConfig): number {
+  return config.rowLimit ?? SAFETY_DEFAULTS.rowLimit;
+}
+
+/** Resolve the per-query timeout in ms (config override or code default). */
+export function resolveQueryTimeoutMs(config: EngineConfig): number {
+  return config.queryTimeoutMs ?? SAFETY_DEFAULTS.queryTimeoutMs;
+}
+
+/** Resolve the connect timeout in ms (config override or code default). */
+export function resolveConnectTimeoutMs(config: EngineConfig): number {
+  return config.connectTimeoutMs ?? SAFETY_DEFAULTS.connectTimeoutMs;
+}
+
+/** Config keys that must be positive integers when present (fail loud at load). */
+const NUMERIC_LIMIT_FIELDS = ["rowLimit", "queryTimeoutMs", "connectTimeoutMs"] as const;
 
 const DEFAULT_CONFIG_PATH = path.resolve(process.cwd(), "config.yaml");
 
@@ -58,6 +93,18 @@ export function loadConfig(configPath?: string): AiDbaConfig {
         `  url: mysql://user:pass@host:3306/dbname?ssl=true\n` +
         `  host: 127.0.0.1  (with port, user, password, database)`
       );
+    }
+    // Safety limits fail loud at startup — a non-numeric value must never
+    // silently fall back to a default the operator did not choose.
+    for (const field of NUMERIC_LIMIT_FIELDS) {
+      const value = (engine as unknown as Record<string, unknown>)[field];
+      if (value === undefined) continue;
+      if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+        throw new Error(
+          `Engine "${id}" field "${field}" must be a positive integer, got: ${JSON.stringify(value)}. ` +
+          `Example: ${field}: ${SAFETY_DEFAULTS[field]}`
+        );
+      }
     }
   }
 

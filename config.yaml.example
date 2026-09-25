@@ -40,6 +40,16 @@ engines:
   #   url: mysql://root:***@staging:3306/app
   #   allowWriteOps: true    # kill-process enabled
 
+  # Sprint 10 Part 2a: per-engine safety limits (all optional; code defaults shown)
+  #   rowLimit: 1000          # query() row cap — results sliced to this; truncated: true when capped
+  #   queryTimeoutMs: 30000   # per-query timeout in ms
+  #   connectTimeoutMs: 10000 # connect timeout in ms
+  # mysql-reporting:
+  #   type: mysql
+  #   url: mysql://root:yourpassword@reporting:3306/app
+  #   rowLimit: 5000
+  #   queryTimeoutMs: 60000
+
   # PostgreSQL with SSL
   # postgres-prod:
   #   type: postgres
