@@ -162,3 +162,75 @@ describe("MongoDbConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
     await expect(connector.listSlowQueries("deg-mongo", config)).rejects.toThrow(/connection reset by peer/);
   });
 });
+
+describe("MongoDbConnector — cap on aggregate/distinct/count branches (review m2)", () => {
+  function setupCmd(coll: Record<string, unknown>) {
+    const connector = new MongoDbConnector();
+    const collection = vi.fn().mockReturnValue(coll);
+    const client = { db: vi.fn().mockReturnValue({ collection }) };
+    // @ts-expect-error - we're mocking the private client cache
+    connector.clients.set("cmd-engine", client);
+    const config: EngineConfig = { type: "mongodb", url: "mongodb://u:***@localhost:27017/db", rowLimit: 2 };
+    return { connector, config };
+  }
+
+  it("aggregate: appends $limit(cap+1) and flags truncation", async () => {
+    const toArray = vi.fn().mockResolvedValue([{ _id: 1 }, { _id: 2 }, { _id: 3 }]);
+    const aggregate = vi.fn().mockReturnValue({ toArray });
+    const { connector, config } = setupCmd({ aggregate });
+    const pipeline = [{ $match: {} }];
+
+    const res = await connector.query("cmd-engine", config, JSON.stringify({ aggregate: "c", pipeline }));
+
+    expect(aggregate).toHaveBeenCalledWith([{ $match: {} }, { $limit: 3 }], { maxTimeMS: 30000 });
+    expect(res.rows).toHaveLength(2);
+    expect(res.truncated).toBe(true);
+    expect(res.rowCap).toBe(2);
+  });
+
+  it("aggregate: never appends $limit after a terminal $out/$merge stage (runs as written, slices client-side)", async () => {
+    const toArray = vi.fn().mockResolvedValue([{ _id: 1 }, { _id: 2 }, { _id: 3 }]);
+    const aggregate = vi.fn().mockReturnValue({ toArray });
+    const { connector, config } = setupCmd({ aggregate });
+    const pipeline = [{ $match: {} }, { $out: "x" }];
+
+    const res = await connector.query("cmd-engine", config, JSON.stringify({ aggregate: "c", pipeline }));
+
+    expect(aggregate).toHaveBeenCalledWith(pipeline, { maxTimeMS: 30000 });
+    // Non-mutation pin: a push-based regression would make the call argument
+    // and `pipeline` the same mutated reference - deep equality would then
+    // pass vacuously (review catch on the original draft).
+    expect(pipeline).toHaveLength(2);
+    expect(res.rows).toHaveLength(2);
+    expect(res.truncated).toBe(true);
+  });
+
+  it("distinct: caps values client-side with the honest flag", async () => {
+    const distinct = vi.fn().mockResolvedValue(["a", "b", "c"]);
+    const { connector, config } = setupCmd({ distinct });
+
+    const res = await connector.query("cmd-engine", config, JSON.stringify({ distinct: "c", field: "v" }));
+
+    expect(distinct).toHaveBeenCalledWith("v", {}, { maxTimeMS: 30000 });
+    expect(res.columns).toEqual(["v"]);
+    expect(res.rows).toHaveLength(2);
+    expect(res.truncated).toBe(true);
+  });
+
+  it("count: single-doc result path stays flag-clean", async () => {
+    const countDocuments = vi.fn().mockResolvedValue(7);
+    const { config } = setupCmd({});
+    const connector = new MongoDbConnector();
+    const coll2 = { countDocuments };
+    const client2 = { db: vi.fn().mockReturnValue({ collection: vi.fn().mockReturnValue(coll2) }) };
+    // @ts-expect-error - we're mocking the private client cache
+    connector.clients.set("cmd-engine", client2);
+
+    const res = await connector.query("cmd-engine", config, JSON.stringify({ count: "c", filter: {} }));
+
+    expect(countDocuments).toHaveBeenCalledWith({}, { maxTimeMS: 30000 });
+    expect(res.rows).toEqual([{ count: 7 }]);
+    expect(res.truncated).toBeUndefined();
+    expect(res.rowCap).toBeUndefined();
+  });
+});
