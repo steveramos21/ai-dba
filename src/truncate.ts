@@ -57,6 +57,9 @@ const MYSQL_PG_HAZARD =
  * The clause is separated by a newline so a trailing "--" line comment cannot
  * swallow it (and a stray unterminated block comment can at worst make the
  * clause inert — the client-side slice keeps the result honest either way).
+ * Compound set operations are safe here: a trailing LIMIT binds the whole
+ * compound result (unlike SQL Server TOP — see rewriteWithTop; do not add a
+ * union guard here).
  */
 export function rewriteWithLimit(sql: string, n: number): string | null {
   if (!isBareSelect(sql)) return null;
@@ -81,6 +84,11 @@ export function rewriteWithTop(sql: string, n: number): string | null {
   if (/\btop\b/i.test(t) || /\binto\b/i.test(t)) return null;
   if (/\bfor\s+(?:xml|json|browse|update)\b/i.test(t)) return null;
   if (/\boffset\b/i.test(t) || /\bfetch\b/i.test(t)) return null;
+  // Compound set operations (UNION / EXCEPT / INTERSECT) would get TOP bound
+  // to the FIRST arm only — valid syntax that silently changes which rows the
+  // query returns. Unlike a trailing LIMIT/FETCH (which binds the whole
+  // compound on MySQL/PG/Oracle), TOP cannot be applied safely, so fall back.
+  if (/\b(?:union|except|intersect)\b/i.test(t)) return null;
   return `SELECT ${match[1] ? "DISTINCT " : ""}TOP (${n}) ${t.slice(match[0].length)}`;
 }
 
@@ -91,7 +99,9 @@ const ORACLE_HAZARD = /\b(?:fetch|rownum|into|for\s+update)\b/i;
 
 /**
  * Oracle (12c+; container is XE 21): append "FETCH FIRST n ROWS ONLY" when
- * provably safe, else null. The connector additionally passes maxRows = n to
+ * provably safe, else null. Compound set operations are safe here too — a
+ * trailing FETCH binds the whole compound (see rewriteWithTop for the SQL
+ * Server asymmetry). The connector additionally passes maxRows = n to
  * the driver — node-oracledb's default maxRows (100) would otherwise cap
  * results silently below the configured rowLimit. Newline-separated for the
  * same comment-safety reason as rewriteWithLimit.

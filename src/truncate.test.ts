@@ -49,6 +49,12 @@ describe("rewriteWithLimit (MySQL / PostgreSQL)", () => {
     );
   });
 
+  it("still rewrites compound set operations — a trailing LIMIT binds the whole result (unlike SQL Server TOP)", () => {
+    expect(rewriteWithLimit("SELECT a FROM t1 UNION SELECT a FROM t2", 5)).toBe(
+      "SELECT a FROM t1 UNION SELECT a FROM t2\nLIMIT 5"
+    );
+  });
+
   it("trims trailing whitespace before appending", () => {
     expect(rewriteWithLimit("SELECT * FROM t\n\n  ", 5)).toBe("SELECT * FROM t\nLIMIT 5");
   });
@@ -137,6 +143,13 @@ describe("rewriteWithTop (SQL Server)", () => {
     expect(rewriteWithTop("DESCRIBE t", 5)).toBeNull();
   });
 
+  it("returns null for compound set operations (TOP would bind only the first arm)", () => {
+    expect(rewriteWithTop("SELECT a FROM t1 UNION SELECT a FROM t2", 5)).toBeNull();
+    expect(rewriteWithTop("select a from t1 union all select a from t2", 5)).toBeNull();
+    expect(rewriteWithTop("SELECT a FROM t1 EXCEPT SELECT a FROM t2", 5)).toBeNull();
+    expect(rewriteWithTop("SELECT a FROM t1 INTERSECT SELECT a FROM t2", 5)).toBeNull();
+  });
+
   it("returns null when destructive keywords appear (defense in depth)", () => {
     expect(rewriteWithTop("SELECT id FROM t WHERE name = 'delete me'", 5)).toBeNull();
   });
@@ -150,6 +163,12 @@ describe("rewriteWithFetchFirst (Oracle)", () => {
   it("appends FETCH FIRST for a WITH ... SELECT", () => {
     expect(rewriteWithFetchFirst("WITH x AS (SELECT 1 FROM dual) SELECT * FROM x", 5)).toBe(
       "WITH x AS (SELECT 1 FROM dual) SELECT * FROM x\nFETCH FIRST 5 ROWS ONLY"
+    );
+  });
+
+  it("still rewrites compound set operations — a trailing FETCH binds the whole result", () => {
+    expect(rewriteWithFetchFirst("SELECT a FROM t1 UNION SELECT a FROM t2", 5)).toBe(
+      "SELECT a FROM t1 UNION SELECT a FROM t2\nFETCH FIRST 5 ROWS ONLY"
     );
   });
 
