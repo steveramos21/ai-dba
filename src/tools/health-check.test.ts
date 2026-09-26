@@ -24,7 +24,7 @@ describe("health-check tool", () => {
       query: vi.fn().mockResolvedValue({ columns: [], rows: [] }),
       getBlockingChains: vi.fn().mockResolvedValue([]),
       listProcesses: vi.fn().mockResolvedValue([{ pid: 1 }, { pid: 2 }]),
-      listSlowQueries: vi.fn().mockResolvedValue([]),
+      listSlowQueries: vi.fn().mockResolvedValue({ queries: [] }),
       listReplicationStatus: vi.fn().mockResolvedValue({ role: "none", lagSeconds: null, status: "not_configured", errorMessage: null }),
     };
     registerHealthCheckTool(server, config, { mysql: conn as any, postgres: conn as any });
@@ -54,7 +54,7 @@ describe("health-check tool", () => {
       query: vi.fn().mockResolvedValue({ columns: [], rows: [] }),
       getBlockingChains: vi.fn().mockResolvedValue([{ blocking_pid: 1, blocked_pid: 2 }]),
       listProcesses: vi.fn().mockResolvedValue([]),
-      listSlowQueries: vi.fn().mockResolvedValue([]),
+      listSlowQueries: vi.fn().mockResolvedValue({ queries: [] }),
       listReplicationStatus: vi.fn().mockResolvedValue({ role: "none", lagSeconds: null, status: "not_configured", errorMessage: null }),
     };
     registerHealthCheckTool(server, config, { mysql: conn as any, postgres: conn as any });
@@ -72,7 +72,7 @@ describe("health-check tool", () => {
       query: vi.fn().mockResolvedValue({ columns: [], rows: [] }),
       getBlockingChains: vi.fn().mockResolvedValue([]),
       listProcesses: vi.fn().mockResolvedValue([]),
-      listSlowQueries: vi.fn().mockResolvedValue([{ id: "q1", query: "SELECT * FROM x", totalExecutionTimeMs: 5000 }]),
+      listSlowQueries: vi.fn().mockResolvedValue({ queries: [{ id: "q1", query: "SELECT * FROM x", totalExecutionTimeMs: 5000 }] }),
       listReplicationStatus: vi.fn().mockResolvedValue({ role: "none", lagSeconds: null, status: "not_configured", errorMessage: null }),
     };
     registerHealthCheckTool(server, config, { mysql: conn as any, postgres: conn as any });
@@ -91,5 +91,27 @@ describe("health-check tool", () => {
     const res = await handlers["health-check"]({ engineId: "nope" });
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain("Unknown engine");
+  });
+
+  it("skips the slow-queries check with the degraded reason when the source is unreadable (Q8 guard)", async () => {
+    const { server, handlers } = mockServer();
+    const reason = "sys.dm_exec_query_stats unavailable (requires VIEW SERVER STATE): The SELECT permission was denied";
+    const conn = {
+      query: vi.fn().mockResolvedValue({ columns: [], rows: [] }),
+      getBlockingChains: vi.fn().mockResolvedValue([]),
+      listProcesses: vi.fn().mockResolvedValue([]),
+      listSlowQueries: vi.fn().mockResolvedValue({ queries: [], degraded: { reason } }),
+      listReplicationStatus: vi.fn().mockResolvedValue({ role: "none", lagSeconds: null, status: "not_configured", errorMessage: null }),
+    };
+    registerHealthCheckTool(server, config, { mysql: conn as any, postgres: conn as any });
+
+    const res = await handlers["health-check"]({ engineId: "pg-test" });
+    const body = JSON.parse(res.content[0].text);
+    // If degraded were dropped, this check would read "pass" — the false-pass guard.
+    expect(body.checks[3].name).toBe("slow-queries");
+    expect(body.checks[3].status).toBe("skip");
+    expect(body.checks[3].message).toContain("VIEW SERVER STATE");
+    // A skip must not poison the aggregate for an otherwise-healthy engine.
+    expect(body.status).toBe("healthy");
   });
 });

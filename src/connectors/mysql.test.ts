@@ -162,3 +162,154 @@ describe("MySQLConnector — cold-start concurrency", () => {
     expect(createPoolMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("MySQLConnector — row cap (Task 1.2)", () => {
+  function setupCap(rows: Record<string, unknown>[]) {
+    const connector = new MySQLConnector();
+    const mockConnection = {
+      query: vi.fn().mockResolvedValue([rows, [{ name: "id" }]]),
+      release: vi.fn(),
+    };
+    const pool = {
+      getConnection: vi.fn().mockResolvedValue(mockConnection),
+      end: vi.fn(),
+    };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("cap-engine", pool);
+    const config: EngineConfig = { type: "mysql", url: "mysql://root@localhost/db", rowLimit: 2 };
+    return { connector, mockConnection, config };
+  }
+
+  it("rewrites a bare SELECT with LIMIT n+1 and flags truncation when the extra row arrives", async () => {
+    const { connector, mockConnection, config } = setupCap([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t");
+
+    // Task 1.3: SELECT/WITH gets a bounded SET SESSION prelude first, then the
+    // capped query itself (object form carries the per-query timeout).
+    const calls = mockConnection.query.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0].sql).toBe("SET SESSION max_execution_time = 30000");
+    expect(calls[1][0].sql).toContain("SELECT * FROM t");
+    expect(calls[1][0].sql).toContain("\nLIMIT 3");
+    expect(calls[1][0].timeout).toBe(30000);
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+    expect(result.rowCap).toBe(2);
+  });
+
+  it("does not flag truncation when rows are at or under the cap", async () => {
+    const { connector, config } = setupCap([{ id: 1 }, { id: 2 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t");
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBeUndefined();
+    expect(result.rowCap).toBeUndefined();
+  });
+
+  it("runs the statement as written and slices client-side when no rewrite is safe (SHOW)", async () => {
+    const { connector, mockConnection, config } = setupCap([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    const result = await connector.query("cap-engine", config, "SHOW TABLES");
+
+    const calls = mockConnection.query.mock.calls;
+    // Non-SELECT: no SET SESSION prelude — exactly one call, object form.
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0].sql).toBe("SHOW TABLES");
+    expect(calls[0][0].sql).not.toContain("LIMIT");
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+  });
+});
+
+describe("MySQLConnector — timeouts (Task 1.3)", () => {
+  const baseConfig: EngineConfig = { type: "mysql", url: "mysql://root@localhost/db" };
+
+  it("rebuilds the pool when the timeout config changes for the same engineId", async () => {
+    vi.clearAllMocks();
+    const poolA = { end: vi.fn() };
+    const poolB = { end: vi.fn() };
+    createPoolMock.mockReturnValueOnce(poolA).mockReturnValueOnce(poolB);
+    const connector = new MySQLConnector();
+
+    expect(await connector.getPool("override-engine", baseConfig)).toBe(poolA);
+    // Plumbing: the URL form must go through an options object so
+    // connectTimeout actually applies (a bare URL string would drop it).
+    expect(createPoolMock.mock.calls[0][0]).toMatchObject({
+      uri: "mysql://root@localhost/db",
+      connectTimeout: 10000,
+    });
+    expect(await connector.getPool("override-engine", baseConfig)).toBe(poolA);
+    expect(createPoolMock).toHaveBeenCalledTimes(1);
+
+    // A later override on the same engineId must not be silently ignored by
+    // the cached pool: the stale pool is torn down and a fresh one built.
+    const overridden = { ...baseConfig, queryTimeoutMs: 5000 };
+    expect(await connector.getPool("override-engine", overridden)).toBe(poolB);
+    expect(createPoolMock).toHaveBeenCalledTimes(2);
+    expect(poolA.end).toHaveBeenCalled();
+
+    // The new fingerprint sticks — no further rebuilds.
+    expect(await connector.getPool("override-engine", overridden)).toBe(poolB);
+    expect(createPoolMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("destroys the connection when a query exceeds queryTimeoutMs", async () => {
+    const connector = new MySQLConnector();
+    const mockConnection = {
+      query: vi.fn()
+        .mockResolvedValueOnce([[], []])                       // SET SESSION prelude
+        .mockImplementationOnce(() => new Promise(() => {})),  // main query hangs
+      release: vi.fn(),
+      destroy: vi.fn(),
+    };
+    const pool = { getConnection: vi.fn().mockResolvedValue(mockConnection), end: vi.fn() };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("slow-engine", pool);
+    const config: EngineConfig = { type: "mysql", url: "mysql://root@localhost/db", queryTimeoutMs: 25 };
+
+    await expect(connector.query("slow-engine", config, "SELECT * FROM t"))
+      .rejects.toThrow(/exceeded its 25ms/);
+    expect(mockConnection.destroy).toHaveBeenCalled();
+  });
+});
+
+describe("MySQLConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
+  function setup(engineId: string, err: unknown) {
+    const connector = new MySQLConnector();
+    const mockConnection = {
+      query: vi.fn().mockRejectedValue(err),
+      release: vi.fn(),
+    };
+    const pool = { getConnection: vi.fn().mockResolvedValue(mockConnection), end: vi.fn() };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set(engineId, pool);
+    const config: EngineConfig = { type: "mysql", url: "mysql://root@localhost/db" };
+    return { connector, config };
+  }
+
+  it("returns empty queries + degraded reason when performance_schema is denied", async () => {
+    const denied = Object.assign(
+      new Error("SELECT command denied to user 'app'@'%' for table 'events_statements_summary_by_digest'"),
+      { code: "ER_TABLEACCESS_DENIED_ERROR" }
+    );
+    const { connector, config } = setup("deg-engine", denied);
+
+    const result = await connector.listSlowQueries("deg-engine", config);
+
+    // Never a bare array, never a silent empty.
+    expect(Array.isArray(result)).toBe(false);
+    expect(result.queries).toEqual([]);
+    expect(result.degraded?.reason).toContain("denied to user");
+  });
+
+  it("rethrows a wrong-column error instead of collapsing it into empty+degraded (Q8 guard)", async () => {
+    const wrongColumn = Object.assign(new Error("Unknown column 'DIGEST_TEXT_XX' in 'field list'"), {
+      code: "ER_BAD_FIELD_ERROR",
+    });
+    const { connector, config } = setup("deg-engine", wrongColumn);
+
+    await expect(connector.listSlowQueries("deg-engine", config)).rejects.toThrow(/Unknown column/);
+  });
+});

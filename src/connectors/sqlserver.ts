@@ -14,12 +14,20 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  SlowQueryResult,
   KillResult,
   ReplicationStatus,
   ServerVariable,
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+import {
+  resolveRowLimit,
+  resolveConnectTimeoutMs,
+  resolveQueryTimeoutMs,
+  timeoutConfigFingerprint,
+} from "../config.js";
+import { applyRowCap, rewriteWithTop } from "../truncate.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
 // startup free of driver cost. Guarded by npm run test:coldstart.
@@ -122,10 +130,32 @@ class TediousConnection {
 export class SqlServerConnector implements DatabaseConnector {
   private connections: Map<string, TediousConnection> = new Map();
   private creatingConnections: Map<string, Promise<TediousConnection>> = new Map();
+  // Timeout fingerprint baked into each cached connection at creation
+  // (Task 1.3): a later config override on the same engineId must rebuild the
+  // connection instead of being silently ignored.
+  private connectionFingerprints: Map<string, string> = new Map();
 
   private async getConnection(engineId: string, config: EngineConfig): Promise<TediousConnection> {
+    const fingerprint = timeoutConfigFingerprint(config);
     const cached = this.connections.get(engineId);
-    if (cached) return cached;
+    if (cached) {
+      const recorded = this.connectionFingerprints.get(engineId);
+      if (recorded === undefined) {
+        // Connection seeded outside getConnection (tests / hand-wired
+        // callers): nothing to compare, so adopt it.
+        this.connectionFingerprints.set(engineId, fingerprint);
+        return cached;
+      }
+      if (recorded === fingerprint) return cached;
+      // Stale: the config changed — evict and rebuild below.
+      this.connections.delete(engineId);
+      this.connectionFingerprints.delete(engineId);
+      try {
+        cached.close();
+      } catch {
+        // best-effort teardown of the stale connection
+      }
+    }
     const inFlight = this.creatingConnections.get(engineId);
     if (inFlight) return inFlight;
     const creating = (async () => {
@@ -154,11 +184,18 @@ export class SqlServerConnector implements DatabaseConnector {
           database: cfg.database,
           trustServerCertificate: true,
           encrypt: false,
+          // Sprint 10 Part 2a — timeouts (ms). connectTimeout bounds the
+          // handshake with a dead host; requestTimeout bounds each request.
+          // It MUST be set explicitly: tedious defaults it to 15000, which is
+          // below the 30000 code default and would fail allowed queries early.
+          connectTimeout: resolveConnectTimeoutMs(config),
+          requestTimeout: resolveQueryTimeoutMs(config),
         },
       });
 
       await conn.connect();
       this.connections.set(engineId, conn);
+      this.connectionFingerprints.set(engineId, fingerprint);
       return conn;
     })().finally(() => this.creatingConnections.delete(engineId));
     this.creatingConnections.set(engineId, creating);
@@ -324,13 +361,16 @@ export class SqlServerConnector implements DatabaseConnector {
     }
   }
 
-  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
     const minDurationUs = Math.round(minDurationMs * 1000);
     const conn = await this.getConnection(engineId, config);
     try {
-      // SQL Server: sys.dm_exec_query_stats — total_elapsed_time is in microseconds
+      // SQL Server: sys.dm_exec_query_stats — total_elapsed_time is in microseconds.
+      // v2 fix: db_name comes from dm_exec_sql_text.dbid — dm_exec_query_stats
+      // has no database_id column (Msg 207, live-proven 2026-09-26; the old
+      // blanket catch had been masking this since sprint 8).
       const { rows } = await conn.execSql(
         `SELECT TOP ${limit}
           qs.sql_handle          AS sql_handle,
@@ -342,13 +382,13 @@ export class SqlServerConnector implements DatabaseConnector {
           qs.total_rows           AS rows_returned,
           qs.total_logical_reads  AS logical_reads,
           st.text                 AS query_text,
-          DB_NAME(qs.database_id) AS db_name
+          DB_NAME(st.dbid)        AS db_name
         FROM sys.dm_exec_query_stats qs
         CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
         WHERE qs.total_elapsed_time >= ${minDurationUs}
         ORDER BY qs.total_elapsed_time DESC`
       );
-      return rows.map((row: any, i: number) => ({
+      return { queries: rows.map((row: any, i: number) => ({
         id: `sqlserver-${i}`,
         query: (row.query_text ?? "").substring(0, 2000),
         database: row.db_name ?? undefined,
@@ -357,10 +397,23 @@ export class SqlServerConnector implements DatabaseConnector {
         avgExecutionTimeMs: row.avg_time_us != null ? Math.round(Number(row.avg_time_us) / 1000) : undefined,
         maxExecutionTimeMs: Math.round(Number(row.max_time_us) / 1000),
         rowsReturned: Number(row.rows_returned) || undefined,
-      }));
-    } catch {
-      // sys.dm_exec_query_stats requires VIEW SERVER STATE — return empty if denied
-      return [];
+      })) };
+    } catch (e: any) {
+      // sys.dm_exec_query_stats requires VIEW SERVER STATE — a denial is a
+      // "couldn't read the source" case (empty + degraded), never a silent
+      // empty. Whitelist-only: permission-denied phrases. Anything else —
+      // e.g. "Invalid column name" from a wrong column — must rethrow and
+      // surface as an error (the ORA-00904-class guard).
+      const msg = String(e?.message ?? "");
+      if (/permission was denied|permission denied|does not have permission|VIEW SERVER STATE/i.test(msg)) {
+        return {
+          queries: [],
+          degraded: {
+            reason: `sys.dm_exec_query_stats unavailable (requires VIEW SERVER STATE): ${msg}`,
+          },
+        };
+      }
+      throw e;
     }
   }
 
@@ -406,9 +459,23 @@ export class SqlServerConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, EXPLAIN, DESCRIBE, DESC) are allowed for now.");
     }
 
+    const cap = resolveRowLimit(config);
+    // Sprint 10 Part 2a — row cap. Server-side TOP (n+1) only when provably
+    // safe (see src/truncate.ts); on any doubt the statement runs as written
+    // and the client-side slice below enforces the cap with the same honest
+    // flag. A rewrite must never turn a working query into a failing one.
+    const effectiveSql = rewriteWithTop(sql, cap + 1) ?? sql;
+
     const conn = await this.getConnection(engineId, config);
-    const { columns, rows } = await conn.execSql(sql);
-    return { columns, rows };
+    const { columns, rows } = await conn.execSql(effectiveSql);
+    const capped = applyRowCap(rows, cap);
+    return {
+      columns,
+      rows: capped.rows,
+      // Only surfaced when rows were actually dropped ("no flag" otherwise).
+      truncated: capped.truncated || undefined,
+      rowCap: capped.truncated ? capped.rowCap : undefined,
+    };
   }
 
   async getBlockingChains(engineId: string, config: EngineConfig): Promise<BlockingChain[]> {
@@ -457,6 +524,7 @@ export class SqlServerConnector implements DatabaseConnector {
       conn.close();
     }
     this.connections.clear();
+    this.connectionFingerprints.clear();
   }
 
   // ─── Sprint 9: Write operations + server diagnostics ───

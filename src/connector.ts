@@ -55,6 +55,10 @@ export interface QueryResult {
   columns: string[];
   rows: Record<string, unknown>[];
   affectedRows?: number;
+  /** True when the result was capped at the engine's rowLimit. */
+  truncated?: boolean;
+  /** The cap that applied (default 1000). */
+  rowCap?: number;
 }
 
 export interface TableSizeInfo {
@@ -74,6 +78,8 @@ export interface ExplainResult {
   estimatedCost?: number;
   estimatedRows?: number;
   analyzed: boolean;
+  /** Present when a plan source exists but could not be read (e.g. Oracle plan_table access denied). */
+  degraded?: string;
 }
 
 export interface ExplainOptions {
@@ -97,6 +103,12 @@ export interface SlowQueryInfo {
 export interface SlowQueryOptions {
   limit?: number;
   minDurationMs?: number;
+}
+
+export interface SlowQueryResult {
+  queries: SlowQueryInfo[];
+  /** Present when the source exists but could not be read (privilege/extension). NEVER silently empty instead. */
+  degraded?: { reason: string };
 }
 
 export interface KillResult {
@@ -189,7 +201,7 @@ export interface DatabaseConnector {
   explainQuery(engineId: string, config: import("./config.js").EngineConfig, query: string, options?: ExplainOptions): Promise<ExplainResult>;
 
   /** List slow queries from engine internals (performance_schema, pg_stat_statements, etc.) */
-  listSlowQueries(engineId: string, config: import("./config.js").EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]>;
+  listSlowQueries(engineId: string, config: import("./config.js").EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult>;
 
   /** Show active processes/connections */
   listProcesses(engineId: string, config: import("./config.js").EngineConfig): Promise<ProcessInfo[]>;

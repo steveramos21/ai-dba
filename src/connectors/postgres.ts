@@ -14,12 +14,21 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  SlowQueryResult,
   KillResult,
   ReplicationStatus,
   ServerVariable,
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+import {
+  resolveRowLimit,
+  resolveConnectTimeoutMs,
+  resolveQueryTimeoutMs,
+  timeoutConfigFingerprint,
+} from "../config.js";
+import { applyRowCap, rewriteWithLimit } from "../truncate.js";
+import { withTimeout, QueryTimeoutError } from "../timeouts.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
 // startup free of driver cost. Guarded by npm run test:coldstart.
@@ -39,10 +48,30 @@ function loadDriver(): Promise<typeof import("pg")> {
 export class PostgreSQLConnector implements DatabaseConnector {
   private pools: Map<string, Pool> = new Map();
   private creatingPools: Map<string, Promise<Pool>> = new Map();
+  // Timeout fingerprint baked into each cached pool at creation (Task 1.3):
+  // a later config override on the same engineId must rebuild the pool.
+  private poolFingerprints: Map<string, string> = new Map();
 
   async getPool(engineId: string, config: EngineConfig): Promise<Pool> {
+    const fingerprint = timeoutConfigFingerprint(config);
     const cached = this.pools.get(engineId);
-    if (cached) return cached;
+    if (cached) {
+      const recorded = this.poolFingerprints.get(engineId);
+      if (recorded === undefined) {
+        // Pool seeded outside getPool (tests / hand-wired callers): nothing to
+        // compare, so adopt it — pools built by getPool always record a
+        // fingerprint and a recorded mismatch below still forces a rebuild.
+        this.poolFingerprints.set(engineId, fingerprint);
+        return cached;
+      }
+      if (recorded === fingerprint) return cached;
+      // Stale: the config changed (e.g. a queryTimeoutMs override on the same
+      // engineId) — tear the old pool down and build a fresh one so the
+      // override can never be silently ignored.
+      this.pools.delete(engineId);
+      this.poolFingerprints.delete(engineId);
+      void Promise.resolve(cached.end()).catch(() => { /* best-effort teardown of the stale pool */ });
+    }
     const inFlight = this.creatingPools.get(engineId);
     if (inFlight) return inFlight;
     const creating = (async () => {
@@ -50,6 +79,13 @@ export class PostgreSQLConnector implements DatabaseConnector {
       const pool = new pg.Pool({
         connectionString: config.url,
         max: 5,
+        // Sprint 10 Part 2a — timeouts (all ms). connectionTimeoutMillis bounds
+        // a dead host at pool.connect(); statement_timeout is enforced
+        // server-side (error 57014) and leaves the connection usable;
+        // query_timeout is pg's client-side timer for the same bound.
+        connectionTimeoutMillis: resolveConnectTimeoutMs(config),
+        statement_timeout: resolveQueryTimeoutMs(config),
+        query_timeout: resolveQueryTimeoutMs(config),
       });
       // Server-side termination of an idle pooled client (restart, admin kill)
       // emits 'error'; without a listener that crashes long-running `serve`.
@@ -57,6 +93,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
         console.error(`[ai-dba] PostgreSQL pool error (${engineId}): ${err.message}`);
       });
       this.pools.set(engineId, pool);
+      this.poolFingerprints.set(engineId, fingerprint);
       return pool;
     })().finally(() => this.creatingPools.delete(engineId));
     this.creatingPools.set(engineId, creating);
@@ -274,7 +311,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
     }
   }
 
-  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
     const pool = await this.getPool(engineId, config);
@@ -297,7 +334,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
         LIMIT $2`,
         [minDurationMs, limit]
       );
-      return res.rows.map((row: any) => ({
+      return { queries: res.rows.map((row: any) => ({
         id: `pg-${row.query_id}`,
         query: row.query_text ?? "",
         executionCount: Number(row.exec_count),
@@ -305,13 +342,22 @@ export class PostgreSQLConnector implements DatabaseConnector {
         avgExecutionTimeMs: Math.round(Number(row.avg_time_ms)),
         maxExecutionTimeMs: Math.round(Number(row.max_time_ms)),
         rowsReturned: Number(row.rows_returned) || undefined,
-      }));
+      })) };
     } catch (e: any) {
-      // Extension not installed or permission denied — return empty
-      if (e.message?.includes("pg_stat_statements") ||
-          e.message?.includes("does not exist") ||
-          e.code === "42501" || e.code === "42P01") {
-        return [];
+      // Extension not installed or not readable — "couldn't read" (empty +
+      // degraded), never a silent empty. Whitelist-only: 42P01 (missing
+      // relation), 42501 (privilege denied), or an extension-load failure
+      // named in the message. Deliberately NOT a generic "does not exist"
+      // match: a wrong-column error (42703 — the ORA-00904 class) must
+      // rethrow and surface as an error.
+      const msg = String(e?.message ?? "");
+      if (e.code === "42P01" || e.code === "42501" || /pg_stat_statements/i.test(msg)) {
+        return {
+          queries: [],
+          degraded: {
+            reason: `pg_stat_statements unavailable (extension not installed or not readable): ${msg}`,
+          },
+        };
       }
       throw e;
     } finally {
@@ -355,10 +401,32 @@ export class PostgreSQLConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, SHOW, EXPLAIN, DESCRIBE, DESC) are allowed for now.");
     }
 
+    const cap = resolveRowLimit(config);
+    const queryTimeoutMs = resolveQueryTimeoutMs(config);
+    // Sprint 10 Part 2a — row cap. Server-side LIMIT n+1 only when provably
+    // safe (see src/truncate.ts); on any doubt the statement runs as written
+    // and the client-side slice below enforces the cap with the same honest
+    // flag. A rewrite must never turn a working query into a failing one.
+    const effectiveSql = rewriteWithLimit(sql, cap + 1) ?? sql;
+
     const pool = await this.getPool(engineId, config);
     const client = await pool.connect();
+    let timedOut = false;
     try {
-      const res = await client.query(sql);
+      const queryPromise = client.query(effectiveSql);
+      // If the race below expires first, this promise may still reject later;
+      // swallow that late rejection so it can't crash the process.
+      queryPromise.catch(() => {});
+      const res = await withTimeout(queryPromise, queryTimeoutMs, `pg query (${engineId})`)
+        .catch((err) => {
+          // pg's own client-side timer rejects with "Query read timeout"; both
+          // it and our race expiry leave the client mid-flight or wedged, so
+          // destroy it (release(true)) instead of returning it to the pool.
+          if (err instanceof QueryTimeoutError || (err as any)?.message === "Query read timeout") {
+            timedOut = true;
+          }
+          throw err;
+        });
       const columns = res.fields.map((f) => f.name);
       const rowRecords = res.rows.map((row: any) => {
         const record: Record<string, unknown> = {};
@@ -367,9 +435,19 @@ export class PostgreSQLConnector implements DatabaseConnector {
         }
         return record;
       });
-      return { columns, rows: rowRecords };
+      const capped = applyRowCap(rowRecords, cap);
+      return {
+        columns,
+        rows: capped.rows,
+        // Only surfaced when rows were actually dropped ("no flag" otherwise).
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     } finally {
-      client.release();
+      // release(true) destroys the client; a plain release returns it to the
+      // pool. Only a client that timed out is destroyed.
+      if (timedOut) client.release(true);
+      else client.release();
     }
   }
 
@@ -421,6 +499,7 @@ export class PostgreSQLConnector implements DatabaseConnector {
       await pool.end();
     }
     this.pools.clear();
+    this.poolFingerprints.clear();
   }
 
   // ─── Sprint 9: Write operations + server diagnostics ───

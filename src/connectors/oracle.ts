@@ -13,12 +13,21 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  SlowQueryResult,
   KillResult,
   ReplicationStatus,
   ServerVariable,
   ServerStatusMetric,
 } from "../connector.js";
 import { writeAuditEntry } from "../audit.js";
+import {
+  resolveRowLimit,
+  resolveConnectTimeoutMs,
+  resolveQueryTimeoutMs,
+  timeoutConfigFingerprint,
+} from "../config.js";
+import { applyRowCap, rewriteWithFetchFirst } from "../truncate.js";
+import { withTimeout, QueryTimeoutError } from "../timeouts.js";
 
 // Driver loaded on FIRST use, never at module load — keeps CLI/MCP
 // startup free of driver cost. Guarded by npm run test:coldstart.
@@ -65,10 +74,26 @@ export function parseOracleUrl(url: string): {
 export class OracleConnector implements DatabaseConnector {
   private pools: Map<string, any> = new Map();
   private creatingPools: Map<string, Promise<any>> = new Map();
+  // Timeout fingerprint baked into each cached pool at creation (Task 1.3):
+  // a later config override on the same engineId must rebuild the pool.
+  private poolFingerprints: Map<string, string> = new Map();
 
   private async getPool(engineId: string, config: EngineConfig): Promise<any> {
+    const fingerprint = timeoutConfigFingerprint(config);
     const cached = this.pools.get(engineId);
-    if (cached) return cached;
+    if (cached) {
+      const recorded = this.poolFingerprints.get(engineId);
+      if (recorded === undefined) {
+        // Pool seeded outside getPool (tests / hand-wired callers): adopt it.
+        this.poolFingerprints.set(engineId, fingerprint);
+        return cached;
+      }
+      if (recorded === fingerprint) return cached;
+      // Stale: the config changed — tear the old pool down, rebuild below.
+      this.pools.delete(engineId);
+      this.poolFingerprints.delete(engineId);
+      void Promise.resolve(cached.close()).catch(() => { /* best-effort teardown of the stale pool */ });
+    }
     const inFlight = this.creatingPools.get(engineId);
     if (inFlight) return inFlight;
     const creating = (async () => {
@@ -88,8 +113,14 @@ export class OracleConnector implements DatabaseConnector {
         poolMin: 1,
         poolMax: 5,
         poolIncrement: 1,
+        // Sprint 10 Part 2a — connectTimeout for pooled connections is in
+        // SECONDS in node-oracledb (verified: lib/thin/sqlnet/sessionAtts.js
+        // multiplies params.connectTimeout by 1000). Round UP so a configured
+        // budget is never silently shortened.
+        connectTimeout: Math.ceil(resolveConnectTimeoutMs(config) / 1000),
       });
       this.pools.set(engineId, pool);
+      this.poolFingerprints.set(engineId, fingerprint);
       return pool;
     })().finally(() => this.creatingPools.delete(engineId));
     this.creatingPools.set(engineId, creating);
@@ -295,6 +326,7 @@ export class OracleConnector implements DatabaseConnector {
       );
       // Step 2: Read the plan via DBMS_XPLAN
       let plan = "";
+      let degraded: string | undefined;
       try {
         const result = await conn.execute(
           `SELECT * FROM TABLE(DBMS_XPLAN.DISPLAY(NULL, '${stmtId}'))`,
@@ -302,8 +334,11 @@ export class OracleConnector implements DatabaseConnector {
         );
         const rows = result.rows || [];
         plan = rows.map((r: any) => r[0]).join("\n");
-      } catch {
-        // DBMS_XPLAN might not be available — fallback to plan_table
+      } catch (e: any) {
+        // DBMS_XPLAN might not be available (privilege/version) — fall back to
+        // plan_table, but surface the source swap instead of silently
+        // presenting a fallback plan as if it were the preferred one (Task 1.4).
+        degraded = `DBMS_XPLAN.DISPLAY unavailable; plan read from plan_table instead: ${e?.message ?? String(e)}`;
         const result = await conn.execute(
           `SELECT
             LPAD(' ', LEVEL-1) || operation || ' ' || options || ' ' || object_name AS plan_line
@@ -316,7 +351,7 @@ export class OracleConnector implements DatabaseConnector {
         const rows = result.rows || [];
         plan = rows.map((r: any) => r[0]).join("\n");
       }
-      return { plan, format: "text", analyzed: false };
+      return { plan, format: "text", analyzed: false, ...(degraded ? { degraded } : {}) };
     } finally {
       // Step 3: Clean up — always delete the plan rows
       try {
@@ -331,7 +366,7 @@ export class OracleConnector implements DatabaseConnector {
     }
   }
 
-  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
     const minDurationUs = minDurationMs * 1000;
@@ -358,7 +393,7 @@ export class OracleConnector implements DatabaseConnector {
         [minDurationUs, limit]
       );
       const rows = result.rows || [];
-      return rows.map((row: any) => ({
+      return { queries: rows.map((row: any) => ({
         id: `oracle-${row[0]}`,
         query: (row[1] ?? "").substring(0, 2000),
         executionCount: Number(row[2]) || undefined,
@@ -366,11 +401,21 @@ export class OracleConnector implements DatabaseConnector {
         avgExecutionTimeMs: row[4] ? Math.round(Number(row[4]) / 1000) : undefined,
         maxExecutionTimeMs: row[5] != null ? Math.round(Number(row[5]) / 1000) : undefined,
         rowsReturned: Number(row[8]) || undefined,
-      }));
+      })) };
     } catch (e: any) {
-      // V$SQLAREA requires SELECT ANY DICTIONARY — return empty if no permission
-      if (e.message?.includes("ORA-00942") || e.message?.includes("ORA-01031")) {
-        return [];
+      // V$SQLAREA requires SELECT ANY DICTIONARY — a denial is "couldn't read
+      // the source" (empty + degraded), never a silent empty. Whitelist-only:
+      // ORA-00942 (view does not exist) and ORA-01031 (insufficient
+      // privileges). ORA-00904 (invalid identifier - wrong column) is NOT
+      // whitelisted: it must rethrow and surface as an error.
+      const msg = String(e?.message ?? "");
+      if (msg.includes("ORA-00942") || msg.includes("ORA-01031")) {
+        return {
+          queries: [],
+          degraded: {
+            reason: `v$sqlarea unavailable (requires SELECT ANY DICTIONARY): ${msg}`,
+          },
+        };
       }
       throw e;
     } finally {
@@ -430,21 +475,74 @@ export class OracleConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, EXPLAIN, DESCRIBE) are allowed for now.");
     }
 
+    const cap = resolveRowLimit(config);
+    const queryTimeoutMs = resolveQueryTimeoutMs(config);
+    // Sprint 10 Part 2a — row cap. Server-side FETCH FIRST n+1 only when
+    // provably safe (see src/truncate.ts); on any doubt the statement runs as
+    // written and the client-side slice below enforces the cap with the same
+    // honest flag. maxRows must be set explicitly rather than relying on the
+    // driver default, which varies by release (0 = unlimited in oracledb 7,
+    // capped at 100 in older drivers) — cap + 1 bounds the driver-side fetch
+    // to exactly what the cap logic needs.
+    const effectiveSql = rewriteWithFetchFirst(sql, cap + 1) ?? sql;
+
     const pool = await this.getPool(engineId, config);
     const conn = await pool.getConnection();
+    // callTimeout is a per-connection round-trip bound in ms; set it on every
+    // query so a pooled connection always carries this engine's current bound
+    // (the pool fingerprint above guarantees a config change rebuilds the pool).
+    conn.callTimeout = queryTimeoutMs;
+    let timedOut = false;
     try {
-      const result = await conn.execute(sql, [], { resultSet: false });
+      // Annotated because conn is `any` (Oracle pools are typed any) — without
+      // it, withTimeout<T> would infer T = unknown and lose the Result shape.
+      const execPromise: Promise<import("oracledb").Result> = conn.execute(effectiveSql, [], { resultSet: false, maxRows: cap + 1 });
+      // If the race below expires first, this promise may still reject later;
+      // swallow that late rejection so it can't crash the process.
+      execPromise.catch(() => {});
+      const result = await withTimeout(execPromise, queryTimeoutMs, `oracle query (${engineId})`)
+        .catch((err) => {
+          // ORA-01013 is the server-side twin of our race expiry (callTimeout
+          // fired); NJS-123 is the thin driver's callTimeout expiry surface
+          // (it can reject before our race timer). Either way the session is
+          // mid-call and must not be reused.
+          if (err instanceof QueryTimeoutError || /ORA-01013|NJS-123/.test(String((err as any)?.message))) {
+            timedOut = true;
+          }
+          throw err;
+        });
       const columns = (result.metaData || []).map((m: { name: string }) => m.name);
-      const rows = (result.rows || []).map((row: any[]) => {
+      const rows: Record<string, unknown>[] = (result.rows || []).map((row: any[]) => {
         const record: Record<string, unknown> = {};
         for (let i = 0; i < columns.length; i++) {
           record[columns[i]] = row[i];
         }
         return record;
       });
-      return { columns, rows };
+      const capped = applyRowCap(rows, cap);
+      return {
+        columns,
+        rows: capped.rows,
+        // Only surfaced when rows were actually dropped ("no flag" otherwise).
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     } finally {
-      await conn.close();
+      // On timeout the session is mid-call — drop it (never return it to the
+      // pool) so it cannot hold a pool slot. The drop itself may fail against
+      // a dead session; the connection is discarded either way.
+      if (timedOut) {
+        // Detached on purpose (v2 fix, 2026-09-26): oracledb's close() waits
+        // for the in-flight call to settle, so awaiting it here held the
+        // CALLER to server completion — the exact contract this timeout
+        // exists to prevent (live probe: SLEEP(30) surfaced at 30.3s with an
+        // awaited drop, vs the 2000ms override). Initiate the drop, return
+        // promptly; teardown completes in the background (the exec promise's
+        // late rejection is already guarded above).
+        void Promise.resolve(conn.close({ drop: true })).catch(() => { /* session already unusable */ });
+      } else {
+        await conn.close();
+      }
     }
   }
 
@@ -504,6 +602,7 @@ export class OracleConnector implements DatabaseConnector {
       await pool.close();
     }
     this.pools.clear();
+    this.poolFingerprints.clear();
   }
 
   // ─── Sprint 9: Write operations + server diagnostics ───

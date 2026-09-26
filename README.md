@@ -361,6 +361,23 @@ The `url` field takes priority over individual fields. MySQL supports additional
 
 PostgreSQL URLs are passed directly to `pg.Pool({ connectionString })`, so any `pg`-supported parameter works (`sslmode`, `connect_timeout`, etc.).
 
+
+### Per-engine safety limits (Sprint 10 Part 2a)
+
+All engines support three optional safety limits (defaults shown):
+
+```yaml
+engines:
+  mysql-prod:
+    type: mysql
+    url: mysql://readonly:***@prod-db.internal:3306/app_db
+    rowLimit: 1000            # query() row cap — result sliced to this with `truncated: true`
+    queryTimeoutMs: 30000     # per-query timeout (ms) — MySQL/PG/Oracle destroy a timed-out session; SQL Server cancels the request; MongoDB cancels server-side
+    connectTimeoutMs: 10000   # connect timeout (ms)
+```
+
+Empty results distinguish *nothing found* from *couldn't read*: when a privilege or extension error prevents a read, results carry `degraded` + a reason instead of a silent `[]`.
+
 ### Individual fields (legacy)
 
 ```yaml

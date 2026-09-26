@@ -1,6 +1,14 @@
 import type { Pool, RowDataPacket } from "mysql2/promise";
-import { resolveMysqlConfig } from "../config.js";
+import {
+  resolveMysqlConfig,
+  resolveRowLimit,
+  resolveConnectTimeoutMs,
+  resolveQueryTimeoutMs,
+  timeoutConfigFingerprint,
+} from "../config.js";
 import type { EngineConfig } from "../config.js";
+import { applyRowCap, rewriteWithLimit } from "../truncate.js";
+import { withTimeout, QueryTimeoutError } from "../timeouts.js";
 import type {
   DatabaseConnector,
   DatabaseInfo,
@@ -15,6 +23,7 @@ import type {
   ExplainOptions,
   SlowQueryInfo,
   SlowQueryOptions,
+  SlowQueryResult,
   KillResult,
   ReplicationStatus,
   ServerVariable,
@@ -40,18 +49,45 @@ function loadDriver(): Promise<typeof import("mysql2/promise")> {
 export class MySQLConnector implements DatabaseConnector {
   private pools: Map<string, Pool> = new Map();
   private creatingPools: Map<string, Promise<Pool>> = new Map();
+  // Timeout fingerprint baked into each cached pool at creation (Task 1.3):
+  // a later config override on the same engineId must rebuild the pool, never
+  // be silently ignored by the cached one.
+  private poolFingerprints: Map<string, string> = new Map();
 
   async getPool(engineId: string, config: EngineConfig): Promise<Pool> {
+    const fingerprint = timeoutConfigFingerprint(config);
     const cached = this.pools.get(engineId);
-    if (cached) return cached;
+    if (cached) {
+      const recorded = this.poolFingerprints.get(engineId);
+      if (recorded === undefined) {
+        // Pool seeded outside getPool (tests / hand-wired callers): there is
+        // nothing to compare, so adopt it. Pools built by getPool always
+        // record a fingerprint, and a recorded mismatch below still forces a
+        // rebuild — the override guarantee holds.
+        this.poolFingerprints.set(engineId, fingerprint);
+        return cached;
+      }
+      if (recorded === fingerprint) return cached;
+      // Stale: the config changed (e.g. a queryTimeoutMs override on the same
+      // engineId) — tear the old pool down and build a fresh one so the
+      // override can never be silently ignored.
+      this.pools.delete(engineId);
+      this.poolFingerprints.delete(engineId);
+      void Promise.resolve(cached.end()).catch(() => { /* best-effort teardown of the stale pool */ });
+    }
     // De-duplicate concurrent first calls — without this, two parallel tool
-    // calls on a cold engine each create a pool and one is leaked.
+    // calls on a cold engine each create a pool and one is leaked. (An in-flight
+    // creation may belong to a slightly different config in a rapid-override
+    // race; the next acquisition re-checks the fingerprint and rebuilds.)
     const inFlight = this.creatingPools.get(engineId);
     if (inFlight) return inFlight;
     const creating = (async () => {
       const mysql = await loadDriver();
+      const connectTimeout = resolveConnectTimeoutMs(config);
       const pool = config.url
-        ? mysql.createPool(config.url)
+        // Options object (not the bare URL string) so connectTimeout applies;
+        // mysql2 merges URL params in and explicit keys win.
+        ? mysql.createPool({ uri: config.url, connectTimeout })
         : mysql.createPool({
             host: config.host,
             port: config.port,
@@ -59,8 +95,10 @@ export class MySQLConnector implements DatabaseConnector {
             password: config.password,
             database: config.database,
             ssl: config.ssl ? { rejectUnauthorized: false } : undefined,
+            connectTimeout,
           });
       this.pools.set(engineId, pool);
+      this.poolFingerprints.set(engineId, fingerprint);
       return pool;
     })().finally(() => this.creatingPools.delete(engineId));
     this.creatingPools.set(engineId, creating);
@@ -237,7 +275,7 @@ export class MySQLConnector implements DatabaseConnector {
     }
   }
 
-  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryInfo[]> {
+  async listSlowQueries(engineId: string, config: EngineConfig, options?: SlowQueryOptions): Promise<SlowQueryResult> {
     const limit = options?.limit ?? 10;
     const minDurationMs = options?.minDurationMs ?? 1000;
     const pool = await this.getPool(engineId, config);
@@ -264,7 +302,7 @@ export class MySQLConnector implements DatabaseConnector {
         LIMIT ?`,
         [minDurationMs, limit]
       );
-      return rows.map((row: any, i: number) => ({
+      return { queries: rows.map((row: any, i: number) => ({
         id: `mysql-${i}`,
         query: row.digest_text ?? "",
         database: row.schema_name ?? undefined,
@@ -276,11 +314,31 @@ export class MySQLConnector implements DatabaseConnector {
         rowsReturned: Number(row.rows_returned) || undefined,
         firstSeen: row.first_seen ? String(row.first_seen) : undefined,
         lastSeen: row.last_seen ? String(row.last_seen) : undefined,
-      }));
+      })) };
     } catch (e: any) {
-      // performance_schema may be disabled or not accessible
-      if (e.message?.includes("performance_schema") || e.code === "ER_ACCESS_DENIED") {
-        return [];
+      // performance_schema may be disabled or not accessible — that is a
+      // "couldn't read the source" case (empty + degraded), never a silent
+      // empty. Whitelist-only: a disabled/absent schema is recognized by the
+      // message, a denial by the real mysql2 error codes. Anything else —
+      // e.g. a wrong column raising ER_BAD_FIELD_ERROR — must rethrow and
+      // surface as an error.
+      const msg = String(e?.message ?? "");
+      const code = String(e?.code ?? "");
+      const deniedCodes = [
+        "ER_ACCESS_DENIED",
+        "ER_ACCESS_DENIED_ERROR",
+        "ER_DBACCESS_DENIED_ERROR",
+        "ER_TABLEACCESS_DENIED_ERROR",
+        "ER_COLUMNACCESS_DENIED_ERROR",
+        "ER_SPECIFIC_ACCESS_DENIED_ERROR",
+      ];
+      if (/performance_schema/i.test(msg) || deniedCodes.includes(code)) {
+        return {
+          queries: [],
+          degraded: {
+            reason: `performance_schema.events_statements_summary_by_digest unavailable (disabled or access denied): ${msg}`,
+          },
+        };
       }
       throw e;
     } finally {
@@ -324,10 +382,59 @@ export class MySQLConnector implements DatabaseConnector {
       throw new Error("Only read-only queries (SELECT, WITH, SHOW, EXPLAIN, DESCRIBE, DESC) are allowed for now.");
     }
 
+    const cap = resolveRowLimit(config);
+    const queryTimeoutMs = resolveQueryTimeoutMs(config);
+    // Sprint 10 Part 2a — row cap. Server-side LIMIT n+1 only when provably
+    // safe (see src/truncate.ts); on any doubt the statement runs as written
+    // and the client-side slice below enforces the cap with the same honest
+    // flag. A rewrite must never turn a working query into a failing one.
+    const effectiveSql = rewriteWithLimit(sql, cap + 1) ?? sql;
+
     const pool = await this.getPool(engineId, config);
     const connection = await pool.getConnection();
     try {
-      const [rows, fields] = await connection.query<RowDataPacket[]>(sql);
+      // Server-side execution cap for SELECT/WITH (max_execution_time applies
+      // to SELECT statements only). Best-effort: a server that rejects the SET
+      // must not fail an otherwise-working query — the race below still bounds
+      // it client-side. The value is this engine's configured query timeout, so
+      // a pooled connection carrying it between calls is bounded by the engine
+      // bound, not leaked state; a config change rebuilds the pool (fingerprint
+      // above), and a timeout destroys the connection outright.
+      if (/^\s*(select|with)\b/i.test(sql)) {
+        const preludePromise = connection.query({ sql: `SET SESSION max_execution_time = ${queryTimeoutMs}` });
+        preludePromise.catch(() => {});
+        try {
+          await withTimeout(preludePromise, queryTimeoutMs, `mysql session setup (${engineId})`);
+        } catch (err) {
+          // A timeout here means the connection is already wedged: destroy it
+          // and surface the timeout rather than hanging forever on the SET.
+          if (err instanceof QueryTimeoutError || (err as any)?.code === "PROTOCOL_SEQUENCE_TIMEOUT") {
+            connection.destroy();
+            throw err;
+          }
+          // Any other prelude failure is non-fatal: the server-side cap is
+          // unavailable, but the client-side race below still bounds the query.
+        }
+      }
+      // Per-query driver timeout (protocol inactivity bound) plus the portable
+      // race below — whichever fires first is handled identically.
+      const queryPromise = connection.query<RowDataPacket[]>({ sql: effectiveSql, timeout: queryTimeoutMs });
+      // If the race below expires first, this promise may still reject later;
+      // swallow that late rejection so it can't crash the process.
+      queryPromise.catch(() => {});
+      const [rows, fields] = await withTimeout(
+        queryPromise,
+        queryTimeoutMs,
+        `mysql query (${engineId})`
+      ).catch((err) => {
+        // On timeout the connection is in an undefined protocol state — destroy
+        // it (never release) so it cannot hold a pool slot and any session
+        // state (max_execution_time above) dies with the socket.
+        if (err instanceof QueryTimeoutError || (err as any)?.code === "PROTOCOL_SEQUENCE_TIMEOUT") {
+          connection.destroy();
+        }
+        throw err;
+      });
       const columns = fields.map((f) => f.name);
       const rowRecords = (rows as any[]).map((row) => {
         const record: Record<string, unknown> = {};
@@ -336,7 +443,14 @@ export class MySQLConnector implements DatabaseConnector {
         }
         return record;
       });
-      return { columns, rows: rowRecords };
+      const capped = applyRowCap(rowRecords, cap);
+      return {
+        columns,
+        rows: capped.rows,
+        // Only surfaced when rows were actually dropped ("no flag" otherwise).
+        truncated: capped.truncated || undefined,
+        rowCap: capped.truncated ? capped.rowCap : undefined,
+      };
     } finally {
       connection.release();
     }
@@ -393,6 +507,7 @@ export class MySQLConnector implements DatabaseConnector {
       await pool.end();
     }
     this.pools.clear();
+    this.poolFingerprints.clear();
   }
 
   // ─── Sprint 9: Write operations + server diagnostics ───

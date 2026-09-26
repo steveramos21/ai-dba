@@ -5,7 +5,10 @@ declare module "oracledb" {
   }
   export interface Connection {
     execute(sql: string, binds?: any[], options?: any): Promise<Result>;
-    close(): Promise<void>;
+    /** Closes the connection. `{ drop: true }` drops the session instead of returning it to the pool. */
+    close(options?: { drop?: boolean }): Promise<void>;
+    /** Round-trip timeout in ms (0 = disabled). Set per query on pooled connections. */
+    callTimeout: number;
   }
   export interface Result {
     rows?: any[][];

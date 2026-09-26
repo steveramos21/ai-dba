@@ -444,10 +444,40 @@ Residual ~8 s MCP startup on 9p is the MCP SDK import itself (~6.8 s standalone 
 - **Post-review consolidated run caught a latent product bug:** Oracle `listSlowQueries` selected `max_elapsed_time` (a SQL Server DMV name) from `v$sqlarea` → ORA-00904 — latent since Sprint 8 because ORA-00942 was swallowed as graceful-empty and the assert **false-passed**. Fixed in `4e6de0c` (`NULL AS max_time_us` + null-guard); sprint8 re-run **86/0**. Oracle `maxExecutionTimeMs` is now permanently `undefined` (v$sqlarea has no per-query max) — do not "restore" it.
 
 ### Deferred to "Trust & Speed, Part 2"
-- Safety layer: row limits (default 1000 + honest truncation flag) and per-engine query/connect timeouts
+- Safety layer: row limits (default 1000 + honest truncation flag) and per-engine query/connect timeouts — **delivered in Part 2a (see below)**
 - Scriptability: `--json` on all CLI commands, health-check exit codes (0/1/2), `health-check --all`
 - health-check consolidation (logic duplicated across CLI/REPL/MCP paths)
 - LICENSE + npm packaging metadata (`bin`, `files`, `repository`)
 - Docs auto-deploy on CI (gh-pages stale since Sprint 8)
 - Behavioral test for the driver-load retry path (vitest factory-caching semantics need validation) — deferred with the 3 connector parity tests
-- Empty-result "graceful degradation" can mask real bugs (it hid the Oracle ORA-00904 for two sprints) — add a `degraded`/notes flag to empty results so privilege changes can't hide column bugs
+- Empty-result "graceful degradation" can mask real bugs (it hid the Oracle ORA-00904 for two sprints) — add a `degraded`/notes flag to empty results so privilege changes can't hide column bugs — **delivered in Part 2a (see below)**
+
+---
+
+## Sprint 10 — Trust & Speed, Part 2a: Safety Layer (COMPLETE)
+
+**Goal**: Every read bounded and honest — no unbounded result sets, no unbounded waits, and no silent empties that can hide real bugs (the class that hid the Oracle ORA-00904 for two sprints).
+
+### What was built
+- **Row cap + honest truncation** — `query()` slices to `rowLimit` (default 1000) and reports `truncated: true` + `rowCap` when capped; exactly-at-cap is *not* flagged.
+- **Per-engine query timeouts** — `queryTimeoutMs` (default 30000); bounded driver-native errors; a timed-out session is never returned to a pool — MySQL/PostgreSQL/Oracle destroy it (Oracle drop detached so the caller is released at the bound), SQL Server cancels the request only (connection reused), MongoDB cancels server-side (client reusable).
+- **Per-engine connect timeouts** — `connectTimeoutMs` (default 10000); a dead host no longer hangs a check.
+- **Degraded-on-empty** — privilege/extension errors (42P01, ORA-00942, ORA-01031, access-denied, code 13) return `degraded` + reason instead of a silent empty; wrong-column errors (ORA-00904, 42703, ER_BAD_FIELD_ERROR, "Invalid column name") **rethrow**.
+- **Config safety fields** — per-engine `rowLimit` / `queryTimeoutMs` / `connectTimeoutMs` overrides in `config.yaml`; unknown keys fail loud at startup; limit changes rebuild the cached pool/connection.
+
+### Bugs found & fixed en route
+- **SQL Server slow-queries — latent since Sprint 8**: `DB_NAME(qs.database_id)`; `sys.dm_exec_query_stats` has no `database_id` column (Msg 207). A blanket `catch { return []; }` had masked it and the suite's green was vacuous on that path. Now `DB_NAME(st.dbid)`, with a SQL-text regression guard.
+- **Oracle timeout release deferred**: an awaited `close({ drop: true })` held the caller until the server settled — `SLEEP(30)` surfaced at 30.3 s despite a 2000 ms override. The drop is now detached; caller released ~2.1 s; the late rejection is guarded.
+- **REPL swallowed config validation errors** (found in review): the repl command's bare `catch` around `loadConfig` turned a typo'd engine key into a silently engine-less session — the exact silent-misconfig class this sprint bans. `loadConfigAllowMissing` now tolerates only a missing file; validation errors surface. Live-probed both directions: bad config -> rc 1 + `unknown key` on stderr; missing config -> clean engine-less start.
+- **Pin-time oracle gap (mysql timeout)** — the v4 fix-pin's mysql probe received the server-side kill form (`SET SESSION max_execution_time` interrupts `SLEEP()`, which returns 1 as a normal row) instead of the client-timer error the probe knew how to classify; both are the same ~2000 ms bound (three co-deadline mechanisms: app race, mysql2 inactivity timer, server cap). The probe now recognizes both kill forms with a strict payload + window check; no connector change (bound held; pool-health green in the red run).
+
+### Evidence (AFTER: stevepc docker stack, 2026-09-26 — `sprint10-part2a-after-v4b.txt`; BEFORE: dev host, 2026-09-19)
+| Surface | Before | After |
+|---|---|---|
+| MySQL rows (`rowcap_test`, 3000 seeded) | 3000 @ 4605 ms | 1000 + `truncated=true` @ 246 ms |
+| PostgreSQL rows | 3000 @ 1030 ms | 1000 + `truncated=true` @ 88 ms |
+| MySQL `SLEEP(5)` (2000 ms override) | completed @ 5006 ms | killed @ 2010 ms |
+| PostgreSQL dead-host connect | pending @ 45 s | bounded typed error @ 5012 ms |
+| PostgreSQL degraded path | silent empty | `degraded.reason` (`pg_stat_statements` unavailable) |
+
+Harness: **22 PASS / 0 FAIL / 1 SKIP** (MongoDB query-timeout — no callable server-side sleep; `maxTimeMS` wiring unit-covered, recorded gap). Unit **201/201** · integration 121 · sprint8 98 · sprint9 115 · blocking 21 · cold-start 3/3 — all suites exit 0. Host note: stevepc runs MongoDB 4.4 via a host-local compose override (Xeon W3680 has no AVX); the override is not part of the repo.

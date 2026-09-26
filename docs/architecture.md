@@ -102,12 +102,12 @@ Each connector's `query()` method checks the SQL/command type before executing. 
 ### Unit Tests (vitest)
 - Test URL parsers, MCP tool dispatch logic, and SQL guard validation
 - Use `vi.fn()` mocks — no real database connections
-- 96 tests across 19 files
+- 201 tests across 22 files
 
 ### Integration Tests
 - `integration-all.mjs`: 121 tests covering 7 connector methods (Sprints 1-7)
-- `integration-sprint8.mjs`: 84 tests covering table-sizes, explain, slow-queries, health-check (Sprint 8)
-- 205 tests total across 5 engines (MySQL, PostgreSQL, SQL Server, Oracle, MongoDB)
+- `integration-sprint8.mjs`: 98 tests covering table-sizes, explain, slow-queries, health-check (Sprint 8)
+- 355 tests total across 5 engines (121 Sprints 1-7 + 98 Sprint 8 + 115 Sprint 9 + 21 blocking)
 - **17 bugs caught** that mocks missed (6 SQL Server, 6 Oracle, 1 MongoDB, 3 MySQL, 1 SQL Server Sprint 8)
 
 ### Lesson Learned

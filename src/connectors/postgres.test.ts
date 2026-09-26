@@ -165,3 +165,140 @@ describe("PostgreSQLConnector — cold-start concurrency", () => {
     expect(poolCtorMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("PostgreSQLConnector — row cap (Task 1.2)", () => {
+  function setupCap(rows: Record<string, unknown>[]) {
+    const connector = new PostgreSQLConnector();
+    const mockClient = {
+      query: vi.fn().mockResolvedValue({ rows, rowCount: rows.length, fields: [{ name: "id" }] }),
+      release: vi.fn(),
+    };
+    const pool = {
+      connect: vi.fn().mockResolvedValue(mockClient),
+      end: vi.fn(),
+    };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("cap-engine", pool);
+    const config: EngineConfig = { type: "postgres", url: "postgresql://postgres@localhost/db", rowLimit: 2 };
+    return { connector, mockClient, config };
+  }
+
+  it("rewrites a bare SELECT with LIMIT n+1 and flags truncation when the extra row arrives", async () => {
+    const { connector, mockClient, config } = setupCap([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t");
+
+    const sql = mockClient.query.mock.calls[0][0] as string;
+    expect(sql).toContain("SELECT * FROM t");
+    expect(sql).toContain("\nLIMIT 3");
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+    expect(result.rowCap).toBe(2);
+  });
+
+  it("does not flag truncation when rows are at or under the cap", async () => {
+    const { connector, config } = setupCap([{ id: 1 }, { id: 2 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t");
+
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBeUndefined();
+    expect(result.rowCap).toBeUndefined();
+  });
+
+  it("runs the statement as written and slices client-side when the rewrite is unsafe (existing LIMIT)", async () => {
+    const { connector, mockClient, config } = setupCap([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+    const result = await connector.query("cap-engine", config, "SELECT * FROM t LIMIT 50");
+
+    const sql = mockClient.query.mock.calls[0][0] as string;
+    expect(sql).toBe("SELECT * FROM t LIMIT 50");
+    expect(result.rows).toHaveLength(2);
+    expect(result.truncated).toBe(true);
+  });
+});
+
+describe("PostgreSQLConnector — timeouts (Task 1.3)", () => {
+  const baseConfig: EngineConfig = { type: "postgres", url: "postgresql://postgres@localhost:5432/testdb" };
+
+  it("plumbs timeout options into the pool and rebuilds on override", async () => {
+    vi.clearAllMocks();
+    const poolA = { end: vi.fn().mockResolvedValue(undefined), on: vi.fn(), connect: vi.fn() };
+    const poolB = { end: vi.fn().mockResolvedValue(undefined), on: vi.fn(), connect: vi.fn() };
+    poolCtorMock.mockReturnValueOnce(poolA).mockReturnValueOnce(poolB);
+    const connector = new PostgreSQLConnector();
+
+    expect(await connector.getPool("override-pg", baseConfig)).toBe(poolA);
+    expect(poolCtorMock.mock.calls[0][0]).toMatchObject({
+      connectionString: baseConfig.url,
+      max: 5,
+      connectionTimeoutMillis: 10000,
+      statement_timeout: 30000,
+      query_timeout: 30000,
+    });
+
+    expect(await connector.getPool("override-pg", baseConfig)).toBe(poolA);
+    expect(poolCtorMock).toHaveBeenCalledTimes(1);
+
+    // A later override on the same engineId must not be silently ignored by
+    // the cached pool: the stale pool is torn down and a fresh one built.
+    const overridden = { ...baseConfig, queryTimeoutMs: 7000 };
+    expect(await connector.getPool("override-pg", overridden)).toBe(poolB);
+    expect(poolCtorMock).toHaveBeenCalledTimes(2);
+    expect(poolCtorMock.mock.calls[1][0]).toMatchObject({ statement_timeout: 7000, query_timeout: 7000 });
+    expect(poolA.end).toHaveBeenCalled();
+  });
+
+  it("destroys the client (release(true)) when a query exceeds the timeout", async () => {
+    const connector = new PostgreSQLConnector();
+    const client = {
+      query: vi.fn().mockImplementation(() => new Promise(() => {})),
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn().mockResolvedValue(client), end: vi.fn() };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set("slow-pg", pool);
+    const config: EngineConfig = { type: "postgres", url: "postgresql://postgres@localhost:5432/testdb", queryTimeoutMs: 25 };
+
+    await expect(connector.query("slow-pg", config, "SELECT 1"))
+      .rejects.toThrow(/exceeded its 25ms/);
+    expect(client.release).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("PostgreSQLConnector — degraded-on-empty (Task 1.4 / Q8 guard)", () => {
+  function setup(engineId: string, err: unknown) {
+    const connector = new PostgreSQLConnector();
+    const client = { query: vi.fn().mockRejectedValue(err), release: vi.fn() };
+    const pool = { connect: vi.fn().mockResolvedValue(client), end: vi.fn() };
+    // @ts-expect-error - we're mocking the private pool
+    connector.pools.set(engineId, pool);
+    const config: EngineConfig = { type: "postgres", url: "postgresql://postgres@localhost:5432/testdb" };
+    return { connector, config };
+  }
+
+  it("returns empty queries + degraded reason when pg_stat_statements is missing (42P01) — the AFTER harness contract", async () => {
+    const missing = Object.assign(new Error('relation "pg_stat_statements" does not exist'), { code: "42P01" });
+    const { connector, config } = setup("pg-degraded", missing);
+
+    // Mirrors the staged AFTER harness call exactly.
+    const result = await connector.listSlowQueries("pg-degraded", config, { limit: 5, minDurationMs: 0 });
+
+    expect(Array.isArray(result)).toBe(false);
+    expect(Array.isArray(result.queries)).toBe(true);
+    expect(result.queries).toEqual([]);
+    expect(result.degraded?.reason).toBeTruthy();
+    expect(result.degraded!.reason).toContain("pg_stat_statements");
+  });
+
+  it("rethrows a wrong-column error (42703) instead of swallowing it as degraded (Q8 guard)", async () => {
+    // The old predicate matched /does not exist/ in the message and swallowed
+    // this class of error. Codes are now whitelisted (42P01/42501) and 42703
+    // must surface as an error.
+    const wrongColumn = Object.assign(new Error('column "total_exec_time_xx" does not exist'), { code: "42703" });
+    const { connector, config } = setup("pg-degraded", wrongColumn);
+
+    await expect(connector.listSlowQueries("pg-degraded", config, { limit: 5, minDurationMs: 0 }))
+      .rejects.toThrow(/total_exec_time_xx/);
+  });
+});

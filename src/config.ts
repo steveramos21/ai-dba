@@ -23,11 +23,80 @@ export interface EngineConfig {
   connectionLimit?: number;
   /** Allow write operations (kill-process). Default: false. */
   allowWriteOps?: boolean;
+  /** Query row cap for query() results. Default: 1000. */
+  rowLimit?: number;
+  /** Per-query timeout, ms. Default: 30000. */
+  queryTimeoutMs?: number;
+  /** Connect timeout, ms. Default: 10000. */
+  connectTimeoutMs?: number;
 }
 
 export interface AiDbaConfig {
   engines: Record<string, EngineConfig>;
 }
+
+/**
+ * Sprint 10 Part 2a — code defaults for the per-engine safety limits.
+ * Resolution order is code default -> per-engine config override only;
+ * connectors always receive concrete values via the resolve* helpers below.
+ */
+export const SAFETY_DEFAULTS = {
+  rowLimit: 1000,
+  queryTimeoutMs: 30000,
+  connectTimeoutMs: 10000,
+} as const;
+
+/** Resolve the query row cap for an engine (config override or code default). */
+export function resolveRowLimit(config: EngineConfig): number {
+  return config.rowLimit ?? SAFETY_DEFAULTS.rowLimit;
+}
+
+/** Resolve the per-query timeout in ms (config override or code default). */
+export function resolveQueryTimeoutMs(config: EngineConfig): number {
+  return config.queryTimeoutMs ?? SAFETY_DEFAULTS.queryTimeoutMs;
+}
+
+/** Resolve the connect timeout in ms (config override or code default). */
+export function resolveConnectTimeoutMs(config: EngineConfig): number {
+  return config.connectTimeoutMs ?? SAFETY_DEFAULTS.connectTimeoutMs;
+}
+
+/**
+ * Fingerprint of the timeout values baked into a cached pool/connection at
+ * creation time (Task 1.3). Connectors compare it on every reuse so a later
+ * config override on the same engineId rebuilds the pool instead of being
+ * silently ignored. Deliberately conservative: it includes the per-query
+ * timeout even for engines that apply it per operation, so an override can
+ * never go unnoticed.
+ */
+export function timeoutConfigFingerprint(config: EngineConfig): string {
+  return `connect=${resolveConnectTimeoutMs(config)};query=${resolveQueryTimeoutMs(config)}`;
+}
+
+/** Config keys that must be positive integers when present (fail loud at load). */
+const NUMERIC_LIMIT_FIELDS = ["rowLimit", "queryTimeoutMs", "connectTimeoutMs"] as const;
+
+/**
+ * Every engine key read anywhere in the codebase. Anything else is a typo or
+ * dead config and fails loud at load (review M1): a silently ignored key
+ * (e.g. "queryTimeout") hides a misconfiguration behind a code default.
+ * Keep in sync with EngineConfig.
+ */
+const ENGINE_CONFIG_KEYS = new Set([
+  "type",
+  "url",
+  "host",
+  "port",
+  "user",
+  "password",
+  "database",
+  "ssl",
+  "connectionLimit",
+  "allowWriteOps",
+  "rowLimit",
+  "queryTimeoutMs",
+  "connectTimeoutMs",
+]);
 
 const DEFAULT_CONFIG_PATH = path.resolve(process.cwd(), "config.yaml");
 
@@ -35,7 +104,12 @@ export function loadConfig(configPath?: string): AiDbaConfig {
   const resolved = configPath ?? DEFAULT_CONFIG_PATH;
 
   if (!fs.existsSync(resolved)) {
-    throw new Error(`Config file not found: ${resolved}`);
+    const err = new Error(`Config file not found: ${resolved}`);
+    // Tag so callers that legitimately run without a config (the REPL) can
+    // discriminate this from validation errors (review m2 / delta-2). The
+    // message stays byte-identical for anyone matching on it.
+    err.name = "ConfigNotFoundError";
+    throw err;
   }
 
   const raw = fs.readFileSync(resolved, "utf-8");
@@ -59,9 +133,53 @@ export function loadConfig(configPath?: string): AiDbaConfig {
         `  host: 127.0.0.1  (with port, user, password, database)`
       );
     }
+    // Unknown keys fail loud: an unrecognized key is almost always a typo
+    // (e.g. "queryTimeout") that would otherwise be silently ignored.
+    for (const key of Object.keys(engine as unknown as Record<string, unknown>)) {
+      if (!ENGINE_CONFIG_KEYS.has(key)) {
+        throw new Error(
+          `Engine "${id}" has unknown key "${key}". ` +
+          `Allowed keys: ${[...ENGINE_CONFIG_KEYS].join(", ")}. ` +
+          `Unknown keys are never read — check for a typo.`
+        );
+      }
+    }
+    // Safety limits fail loud at startup — a non-numeric value must never
+    // silently fall back to a default the operator did not choose.
+    for (const field of NUMERIC_LIMIT_FIELDS) {
+      const value = (engine as unknown as Record<string, unknown>)[field];
+      if (value === undefined) continue;
+      if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
+        throw new Error(
+          `Engine "${id}" field "${field}" must be a positive integer, got: ${JSON.stringify(value)}. ` +
+          `Example: ${field}: ${SAFETY_DEFAULTS[field]}`
+        );
+      }
+    }
   }
 
   return parsed;
+}
+
+/**
+ * Load config, tolerating ONLY a missing file: returns an empty engine map so
+ * interactive entry points (the REPL) still start with no config on disk. Any
+ * validation error — unknown keys, bad safety limits, malformed YAML — is
+ * rethrown, so a typo'd config can never start a silently engine-less session
+ * (review m2 / delta-2: the repl action's bare catch used to swallow exactly
+ * that class). Kept here, not inline in index.ts, so both directions are
+ * unit-pinnable — index.ts cannot be imported in tests (parse() runs at
+ * module load).
+ */
+export function loadConfigAllowMissing(configPath?: string): AiDbaConfig {
+  try {
+    return loadConfig(configPath);
+  } catch (err) {
+    if (err instanceof Error && err.name === "ConfigNotFoundError") {
+      return { engines: {} };
+    }
+    throw err;
+  }
 }
 
 /**
