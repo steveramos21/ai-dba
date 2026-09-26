@@ -193,11 +193,12 @@ async function probeQueryTimeout(label, conn, id, cfg, sql, instantIsSkip) {
 }
 
 async function probePoolHealth(label, conn, id, cfg, sql) {
+  const probe = sql || 'SELECT 1';
   try {
-    const res = await raceCap(conn.query(id, cfg, sql || 'SELECT 1 AS ok'), 15000);
+    const res = await raceCap(conn.query(id, cfg, probe), 15000);
     const n = (res.rows || []).length;
-    if (n >= 1) pass(label + ' pool-health after timeout', 'SELECT 1 ok rows=' + n);
-    else fail(label + ' pool-health after timeout', 'SELECT 1 returned rows=' + n);
+    if (n >= 1) pass(label + ' pool-health after timeout', probe + ' ok rows=' + n);
+    else fail(label + ' pool-health after timeout', probe + ' returned rows=' + n);
   } catch (e) { fail(label + ' pool-health after timeout', 'pool poisoned by timeout: ' + String(e.message).slice(0, 160)); }
 }
 

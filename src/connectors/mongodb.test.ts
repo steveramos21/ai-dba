@@ -219,7 +219,7 @@ describe("MongoDbConnector — cap on aggregate/distinct/count branches (review 
 
   it("count: single-doc result path stays flag-clean", async () => {
     const countDocuments = vi.fn().mockResolvedValue(7);
-    const { config } = setupCmd({});
+    const config: EngineConfig = { type: "mongodb", url: "mongodb://u:***@localhost:27017/db", rowLimit: 2 };
     const connector = new MongoDbConnector();
     const coll2 = { countDocuments };
     const client2 = { db: vi.fn().mockReturnValue({ collection: vi.fn().mockReturnValue(coll2) }) };
