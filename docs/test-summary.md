@@ -4,12 +4,12 @@
 
 | Type | Count | Command |
 |------|-------|---------|
-| Unit tests | 96 | `npm test` |
+| Unit tests | 201 | `npm test` |
 | Integration tests (Sprints 1-7) | 121 | `npm run test:integration` |
-| Integration tests (Sprint 8) | 86 | `npm run test:integration:sprint8` |
+| Integration tests (Sprint 8) | 98 | `npm run test:integration:sprint8` |
 | Integration tests (Sprint 9) | 115 | `npm run test:integration:sprint9` |
 | Integration tests (blocking scenarios) | 21 | `npm run test:blocking` |
-| **Total** | **439** | |
+| **Total** | **556** | |
 
 Plus a 3-check cold-start guard (`npm run test:coldstart`): scans `dist/` for static driver imports and enforces MCP/CLI startup ceilings — wired into CI.
 
@@ -19,7 +19,7 @@ Plus a 3-check cold-start guard (`npm run test:coldstart`): scans `dist/` for st
 npm test
 ```
 
-No Docker required. Tests URL parsers, MCP tool dispatch logic, SQL guard validation, and cold-start pool de-duplication. 96 tests across 19 files covering:
+No Docker required. Tests URL parsers, MCP tool dispatch logic, SQL guard validation, and cold-start pool de-duplication. 201 tests across 22 files covering:
 
 - URL parsers (`parseMysqlUrl`, `parsePostgresUrl`, `parseSqlServerUrl`, `parseOracleUrl`, `parseMongoUrl`)
 - MCP tool dispatch (happy path, unknown engine, unsupported type, connector error propagation)
@@ -33,14 +33,14 @@ Requires 5 Docker containers:
 docker compose up -d
 # Wait for all healthy
 npm run test:integration       # 121 tests (Sprints 1-7)
-npm run test:integration:sprint8  # 86 tests (Sprint 8)
+npm run test:integration:sprint8  # 98 tests (Sprint 8)
 npm run test:integration:sprint9  # 115 tests (Sprint 9)
 npm run test:blocking             # 21 tests (blocking scenarios)
 ```
 
 Tests all 14 connector methods against live MySQL 8.0, PostgreSQL 16, SQL Server 2022, Oracle XE 21, and MongoDB 7.
 
-**Sprint 8 count:** 86 tests with the Oracle grants applied (`test/oracle-grants.sql`); 84 without — the Oracle slow-queries asserts are data-dependent.
+**Sprint 8 count:** 98 tests with the Oracle grants applied (`test/oracle-grants.sql`); the Oracle slow-queries asserts are data-dependent.
 
 ### Bugs Caught by Integration Testing
 
@@ -71,6 +71,6 @@ See [Testing Guide](testing-guide.md) for comprehensive per-engine manual test p
 GitHub Actions runs on every push/PR to main:
 
 - Node 20.x and 22.x matrix
-- `npm ci` → `npm run build` → `npm test` (96 unit tests) → `npm run test:coldstart` (startup guard)
+- `npm ci` → `npm run build` → `npm test` (201 unit tests) → `npm run test:coldstart` (startup guard)
 - CLI entry point verification
 - Integration tests excluded (require 5 Docker containers)

@@ -14,7 +14,7 @@ This guide covers manual testing procedures for all sprints. Each section reflec
 | 6 | MongoDB connector | MERGED | [Sprint 6 - MongoDB](#sprint-6-mongodb) |
 | 8 | Query performance & health | COMPLETE | [Sprint 8 - Performance](#sprint-8-query-performance-health) |
 
-**Test totals:** 96 unit tests + 121 integration (Sprints 1-7) + 86 (Sprint 8, with `test/oracle-grants.sql`) + 115 (Sprint 9) + 21 blocking = 439 tests, all passing.
+**Test totals:** 201 unit tests + 121 integration (Sprints 1-7) + 98 (Sprint 8, with `test/oracle-grants.sql`) + 115 (Sprint 9) + 21 blocking = 556 tests, all passing.
 
 ## Prerequisites (all sprints)
 
@@ -39,7 +39,7 @@ docker info | head -3
 npm test
 ```
 
-**Expected:** 19 test files, 96 tests, all passing. Duration ~20s.
+**Expected:** 22 test files, 201 tests, all passing. Duration ~20s.
 
 ### 2. Integration Tests (Docker required)
 
@@ -175,13 +175,13 @@ docker exec ai-dba-sqlserver-test /opt/mssql-tools18/bin/sqlcmd -S localhost -U 
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 19 test files, 96 tests (includes 4 SQL Server URL parser tests)
+# Expected: 22 test files, 201 tests (includes 4 SQL Server URL parser tests)
 ```
 
 **Step 4: Run integration tests**
 ```bash
 node test/integration-all.mjs
-# Expected: 121 tests total, 0 failures (includes 24 SQL Server tests). Sprint 8 adds 84 more via `npm run test:integration:sprint8`.
+# Expected: 121 tests total, 0 failures (includes 24 SQL Server tests). Sprint 8 adds 98 more via `npm run test:integration:sprint8`.
 ```
 
 **Step 5: CLI tests**
@@ -327,13 +327,13 @@ docker exec ai-dba-oracle-test bash -c "echo 'CREATE TABLE blocking_test (id NUM
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 19 test files, 96 tests (includes 4 Oracle URL parser tests)
+# Expected: 22 test files, 201 tests (includes 4 Oracle URL parser tests)
 ```
 
 **Step 4: Run integration tests**
 ```bash
 node test/integration-all.mjs
-# Expected: 121 tests total, 0 failures (includes 24 Oracle tests). Sprint 8 adds 84 more via `npm run test:integration:sprint8`.
+# Expected: 121 tests total, 0 failures (includes 24 Oracle tests). Sprint 8 adds 98 more via `npm run test:integration:sprint8`.
 ```
 
 **Step 5: CLI tests**
@@ -480,13 +480,13 @@ docker exec ai-dba-mongodb-test mongosh "mongodb://testuser:testpassword@127.0.0
 **Step 3: Run unit tests**
 ```bash
 npm test
-# Expected: 19 test files, 96 tests (includes 4 MongoDB URL parser tests)
+# Expected: 22 test files, 201 tests (includes 4 MongoDB URL parser tests)
 ```
 
 **Step 4: Run integration tests**
 ```bash
 node test/integration-all.mjs
-# Expected: 121 tests total, 0 failures (includes 24 MongoDB tests). Sprint 8 adds 84 more via `npm run test:integration:sprint8`.
+# Expected: 121 tests total, 0 failures (includes 24 MongoDB tests). Sprint 8 adds 98 more via `npm run test:integration:sprint8`.
 ```
 
 **Step 5: CLI tests**
@@ -569,7 +569,7 @@ Run this checklist after all sprints are merged:
 ### Pre-flight
 - [ ] `npm install` — no errors
 - [ ] `npm run build` — TypeScript compiles, 0 errors
-- [ ] `npm test` — 96 unit tests pass
+- [ ] `npm test` — 201 unit tests pass
 - [ ] `docker compose up -d` — all 5 containers healthy (MySQL 13306, PostgreSQL 15432, SQL Server 11433, Oracle 11521, MongoDB 12017)
 
 ### Per-engine verification
@@ -614,7 +614,8 @@ For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb
 
 ### Integration tests
 - [ ] `npm run test:integration` — 121 tests pass (Sprints 1-7)
-- [ ] `npm run test:integration:sprint8` — 84 tests pass (Sprint 8)
+- [ ] `npm run test:integration:sprint8` — 98 tests pass (Sprint 8)
+- [ ] `npm run test:part2a` — Part 2a safety harness: 22 PASS / 0 FAIL / 1 SKIP (MongoDB query-timeout SKIP: no callable server-side sleep; `maxTimeMS` wiring unit-covered)
 
 ### MCP server
 - [ ] `tools/list` returns 14 tools
@@ -634,20 +635,20 @@ For each engine (mysql-test, postgres-test, sqlserver-test, oracle-test, mongodb
 
 - All 5 Docker containers running and healthy
 - `npm run build` succeeds with 0 errors
-- `npm test` passes (96 unit tests)
+- `npm test` passes (201 unit tests)
 
 ### Step 1: Run unit tests
 
 ```bash
 npm test
-# Expected: 19 test files, 96 tests, all passing
+# Expected: 22 test files, 201 tests, all passing
 ```
 
 ### Step 2: Run Sprint 8 integration tests
 
 ```bash
 npm run test:integration:sprint8
-# Expected: 84 tests, 0 failures
+# Expected: 98 tests, 0 failures
 ```
 
 Tests `table-sizes`, `explain`, `slow-queries`, and `health-check` against all 5 live databases. Graceful degradation verified: PostgreSQL returns empty slow queries (no `pg_stat_statements`), Oracle returns empty (no `V$SQLAREA` access), SQL Server returns empty slow queries (no query history yet).

@@ -467,15 +467,17 @@ Residual ~8 s MCP startup on 9p is the MCP SDK import itself (~6.8 s standalone 
 
 ### Bugs found & fixed en route
 - **SQL Server slow-queries — latent since Sprint 8**: `DB_NAME(qs.database_id)`; `sys.dm_exec_query_stats` has no `database_id` column (Msg 207). A blanket `catch { return []; }` had masked it and the suite's green was vacuous on that path. Now `DB_NAME(st.dbid)`, with a SQL-text regression guard.
-- **Oracle timeout release deferred**: an awaited `close({ drop: true })` held the caller until the server settled — `SLEEP(30)` surfaced at 30.3 s despite a 2000 ms override. The drop is now detached; caller released ~2.4 s; the late rejection is guarded.
+- **Oracle timeout release deferred**: an awaited `close({ drop: true })` held the caller until the server settled — `SLEEP(30)` surfaced at 30.3 s despite a 2000 ms override. The drop is now detached; caller released ~2.1 s; the late rejection is guarded.
+- **REPL swallowed config validation errors** (found in review): the repl command's bare `catch` around `loadConfig` turned a typo'd engine key into a silently engine-less session — the exact silent-misconfig class this sprint bans. `loadConfigAllowMissing` now tolerates only a missing file; validation errors surface. Live-probed both directions: bad config -> rc 1 + `unknown key` on stderr; missing config -> clean engine-less start.
+- **Pin-time oracle gap (mysql timeout)** — the v4 fix-pin's mysql probe received the server-side kill form (`SET SESSION max_execution_time` interrupts `SLEEP()`, which returns 1 as a normal row) instead of the client-timer error the probe knew how to classify; both are the same ~2000 ms bound (three co-deadline mechanisms: app race, mysql2 inactivity timer, server cap). The probe now recognizes both kill forms with a strict payload + window check; no connector change (bound held; pool-health green in the red run).
 
-### Evidence (AFTER: stevepc docker stack, 2026-09-26 — `sprint10-part2a-after-v2.txt`; BEFORE: dev host, 2026-09-19)
+### Evidence (AFTER: stevepc docker stack, 2026-09-26 — `sprint10-part2a-after-v4b.txt`; BEFORE: dev host, 2026-09-19)
 | Surface | Before | After |
 |---|---|---|
-| MySQL rows (`rowcap_test`, 3000 seeded) | 3000 @ 4605 ms | 1000 + `truncated=true` @ 381 ms |
-| PostgreSQL rows | 3000 @ 1030 ms | 1000 + `truncated=true` @ 113 ms |
-| MySQL `SLEEP(5)` (2000 ms override) | completed @ 5006 ms | killed @ 2045 ms |
-| PostgreSQL dead-host connect | pending @ 45 s | bounded typed error @ 5014 ms |
+| MySQL rows (`rowcap_test`, 3000 seeded) | 3000 @ 4605 ms | 1000 + `truncated=true` @ 246 ms |
+| PostgreSQL rows | 3000 @ 1030 ms | 1000 + `truncated=true` @ 88 ms |
+| MySQL `SLEEP(5)` (2000 ms override) | completed @ 5006 ms | killed @ 2010 ms |
+| PostgreSQL dead-host connect | pending @ 45 s | bounded typed error @ 5012 ms |
 | PostgreSQL degraded path | silent empty | `degraded.reason` (`pg_stat_statements` unavailable) |
 
-Harness: **19 PASS / 0 FAIL / 1 SKIP** (MongoDB query-timeout — no callable server-side sleep; `maxTimeMS` wiring unit-covered, recorded gap). Unit **188/188** · integration 121 · sprint8 98 · sprint9 115 · blocking 21 · cold-start 3/3 — all suites exit 0. Host note: stevepc runs MongoDB 4.4 via a host-local compose override (Xeon W3680 has no AVX); the override is not part of the repo.
+Harness: **22 PASS / 0 FAIL / 1 SKIP** (MongoDB query-timeout — no callable server-side sleep; `maxTimeMS` wiring unit-covered, recorded gap). Unit **201/201** · integration 121 · sprint8 98 · sprint9 115 · blocking 21 · cold-start 3/3 — all suites exit 0. Host note: stevepc runs MongoDB 4.4 via a host-local compose override (Xeon W3680 has no AVX); the override is not part of the repo.
