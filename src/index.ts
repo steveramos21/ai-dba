@@ -3,7 +3,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import Table from "cli-table3";
-import { loadConfig, parseMysqlUrl, resolveMysqlConfig } from "./config.js";
+import { loadConfig, loadConfigAllowMissing, parseMysqlUrl, resolveMysqlConfig } from "./config.js";
 import type { EngineConfig } from "./config.js";
 import type { DatabaseConnector } from "./connector.js";
 import { validateExplainQuery, isJsonCommand, validateReadOnlySql } from "./sql-guard.js";
@@ -1604,13 +1604,10 @@ program
     const { buildConnectorMap } = await import("./connector-map.js");
     const opts = program.opts();
 
-    // Load config if it exists, otherwise start with empty engines
-    let config: { engines: Record<string, EngineConfig> };
-    try {
-      config = loadConfig(opts.config);
-    } catch {
-      config = { engines: {} };
-    }
+    // Load config if it exists, otherwise start with empty engines. A missing
+    // file is tolerated; a config that fails validation must surface (review
+    // m2 / delta-2 — the previous bare catch swallowed engine-key typos).
+    const config = loadConfigAllowMissing(opts.config);
 
     const connectors: Record<string, DatabaseConnector> = buildConnectorMap();
 

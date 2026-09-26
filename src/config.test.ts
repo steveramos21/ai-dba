@@ -9,6 +9,7 @@ import {
   resolveConnectTimeoutMs,
   timeoutConfigFingerprint,
   loadConfig,
+  loadConfigAllowMissing,
 } from "./config.js";
 
 // Sprint 10 Part 2a — Task 1.1
@@ -169,12 +170,46 @@ describe("unknown engine keys fail loud (review M1)", () => {
       "    queryTimeoutMs: 15000\n" +
       "    connectTimeoutMs: 3000\n" +
       "    connectionLimit: 5\n" +
-      "    allowWriteOps: true\n";
+      "    allowWriteOps: true\n" +
+      '    ssl: {"rejectUnauthorized": false}\n';
     const { path, cleanup } = writeTempConfig(yaml);
     try {
       const cfg = loadConfig(path);
       expect(cfg.engines.e1.rowLimit).toBe(500);
       expect(cfg.engines.e1.allowWriteOps).toBe(true);
+      // Pass-through pin (review m1 / delta-2): the fixture must prove the
+      // allowlisted key survives loadConfig, not merely that it is accepted.
+      expect(cfg.engines.e1.ssl).toEqual({ rejectUnauthorized: false });
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+describe("loadConfigAllowMissing (review m2 / delta-2)", () => {
+  it("returns empty engines when the file is missing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ai-dba-config-test-"));
+    try {
+      const cfg = loadConfigAllowMissing(join(dir, "nope.yaml"));
+      expect(cfg.engines).toEqual({});
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still throws on a typo'd key - the false-pass guard in both directions", () => {
+    const { path, cleanup } = writeTempConfig(BASE + "    queryTimeout: 30000\n");
+    try {
+      expect(() => loadConfigAllowMissing(path)).toThrow(/unknown key "queryTimeout"/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it("still throws on a bad safety limit", () => {
+    const { path, cleanup } = writeTempConfig(BASE + "    rowLimit: 0\n");
+    try {
+      expect(() => loadConfigAllowMissing(path)).toThrow(/positive integer/);
     } finally {
       cleanup();
     }
