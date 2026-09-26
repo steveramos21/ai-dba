@@ -176,7 +176,23 @@ async function probeQueryTimeout(label, conn, id, cfg, sql, instantIsSkip) {
   try {
     const res = await raceCap(conn.query(id, Object.assign({}, cfg, { queryTimeoutMs: OVERRIDE_MS }), sql), 40000);
     const el = Date.now() - t;
-    fail(label + ' query-timeout', 'query COMPLETED in ' + el + 'ms despite queryTimeoutMs=' + OVERRIDE_MS + ' (rows=' + (res.rows || []).length + ') - timeout did not fire');
+    // v4 triage (2026-09-26): the bound has THREE co-deadline mechanisms — app
+    // race, mysql2 inactivity timer, server-side max_execution_time. When the
+    // server cap wins delivery, MySQL interrupts SLEEP() and returns 1 as a
+    // NORMAL result row (probe: probe-mysql-timeout-dist-run.log — 9/10 server
+    // form @2003-2409ms, 1/10 client form, 10/10 pool-health; control SLEEP(2)
+    // -> s=0 @2009ms proves the discriminator). Accept the STRICT server form
+    // ONLY: exactly [{s:1}] inside the kill window. s=0 (true completion),
+    // other payload shapes, and out-of-window resolves still FAIL — a missed
+    // timeout can never hide here.
+    const rows = res.rows || [];
+    const serverForm = rows.length === 1 && rows[0] != null && typeof rows[0] === 'object' &&
+      Object.keys(rows[0]).length === 1 && rows[0].s === 1;
+    if (serverForm && el >= OVERRIDE_MS * 0.5 && el <= OVERRIDE_MS + 1500) {
+      pass(label + ' query-timeout', 'killed at ' + el + 'ms via server-side max_execution_time (interrupted SLEEP delivered as row s=1; override ' + OVERRIDE_MS + 'ms)');
+      return;
+    }
+    fail(label + ' query-timeout', 'query did NOT time out (el=' + el + 'ms, override ' + OVERRIDE_MS + 'ms) payload=' + JSON.stringify(rows).slice(0, 160) + ' - no recognized kill form');
   } catch (e) {
     const el = Date.now() - t;
     const msg = String(e.message).slice(0, 180);
