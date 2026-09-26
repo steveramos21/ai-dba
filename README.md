@@ -372,7 +372,7 @@ engines:
     type: mysql
     url: mysql://readonly:***@prod-db.internal:3306/app_db
     rowLimit: 1000            # query() row cap — result sliced to this with `truncated: true`
-    queryTimeoutMs: 30000     # per-query timeout (ms) — timed-out sessions are never returned to a pool
+    queryTimeoutMs: 30000     # per-query timeout (ms) — MySQL/PG/Oracle destroy a timed-out session; SQL Server cancels the request; MongoDB cancels server-side
     connectTimeoutMs: 10000   # connect timeout (ms)
 ```
 
